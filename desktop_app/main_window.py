@@ -191,21 +191,22 @@ class ZeroTraceMainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-            
+
             if reply == QMessageBox.Yes:
                 self.start_button.setEnabled(False)
                 self.stop_button.setEnabled(True)
                 self.refresh_button.setEnabled(False)
                 self.drive_combo.setEnabled(False)
-                
+
                 # Create and start wipe thread
                 self.wipe_thread = WipeThread(
-                    self.wipe_engine,
-                    self.drive_combo.currentText()
+                    self.drive_combo.currentText(),
+                    'secure',
+                    True
                 )
-                self.wipe_thread.progress_updated.connect(self.update_progress)
-                self.wipe_thread.status_updated.connect(self.update_status)
-                self.wipe_thread.finished.connect(self.wipe_finished)
+                self.wipe_thread.progress_updated.connect(self.on_progress_update)
+                self.wipe_thread.wipe_completed.connect(self.wipe_finished)
+                self.wipe_thread.wipe_failed.connect(self.wipe_failed)
                 self.wipe_thread.start()
     
     def stop_wipe(self):
@@ -226,21 +227,41 @@ class ZeroTraceMainWindow(QMainWindow):
         """Update the progress bar"""
         self.progress_bar.setValue(value)
     
+    def on_progress_update(self, progress, message):
+        """Handle progress update from wipe thread"""
+        self.update_progress(progress)
+        self.update_status(message)
+
     def update_status(self, status):
         """Update the status label"""
         self.status_label.setText(status)
-    
-    def wipe_finished(self):
+
+    def wipe_finished(self, log_path):
         """Handle wipe completion"""
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.refresh_button.setEnabled(True)
         self.drive_combo.setEnabled(True)
         self.wipe_thread = None
-        
+
         QMessageBox.information(
             self,
             "Wipe Complete",
-            "Drive wiping process has completed.",
+            f"Drive wiping process has completed.\nLog saved to: {log_path}",
+            QMessageBox.Ok
+        )
+
+    def wipe_failed(self, error_message):
+        """Handle wipe failure"""
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.refresh_button.setEnabled(True)
+        self.drive_combo.setEnabled(True)
+        self.wipe_thread = None
+
+        QMessageBox.critical(
+            self,
+            "Wipe Failed",
+            f"An error occurred during wiping:\n{error_message}",
             QMessageBox.Ok
         )

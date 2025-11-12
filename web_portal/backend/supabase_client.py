@@ -169,3 +169,68 @@ class SupabaseFlaskClient:
         except Exception as e:
             current_app.logger.error(f"Update error: {e}")
             return False
+    
+    def signup_with_profile(self, email: str, password: str, full_name: str) -> Dict:
+        """
+        Sign up user and create profile using service key
+        
+        Args:
+            email: User email
+            password: User password
+            full_name: User full name
+            
+        Returns:
+            Dict with user data and success status
+        """
+        try:
+            # Create service client for admin operations
+            service_key = current_app.config.get('SUPABASE_SERVICE_KEY')
+            if not service_key:
+                raise ValueError("SUPABASE_SERVICE_KEY not configured")
+            
+            service_client = create_client(
+                current_app.config['SUPABASE_URL'], 
+                service_key
+            )
+            
+            # Sign up user
+            auth_response = service_client.auth.sign_up({
+                'email': email,
+                'password': password,
+                'options': {
+                    'data': {
+                        'full_name': full_name,
+                    }
+                }
+            })
+            
+            if auth_response.user:
+                # Create user profile
+                profile_data = {
+                    'id': auth_response.user.id,
+                    'full_name': full_name
+                }
+                
+                service_client.table('user_profiles').insert(profile_data).execute()
+                
+                return {
+                    'success': True,
+                    'user': {
+                        'id': auth_response.user.id,
+                        'email': auth_response.user.email,
+                        'created_at': auth_response.user.created_at
+                    },
+                    'message': 'User created successfully. Please check your email to verify your account.'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'Failed to create user'
+                }
+                
+        except Exception as e:
+            current_app.logger.error(f"Signup error: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }

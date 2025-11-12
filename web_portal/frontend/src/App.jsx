@@ -1,41 +1,35 @@
+// web_portal/frontend/src/App.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// Note: In a real-world scenario, you would be importing Firebase functions here.
+import { supabase, getCurrentUser } from './Lib/supabase';
 
-// Helper Tailwind class for input fields
+// Helper Tailwind classes
 const INPUT_CLASS = "block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150";
 const CARD_CLASS = "bg-white p-8 sm:p-10 rounded-xl shadow-2xl w-full max-w-md border border-gray-200 transition duration-300 hover:shadow-xl";
 
-/** * PLACEHOLDER HOOK (Handles mock user ID/Auth status)
- * This must be included as all components rely on a user ID context.
- */
-const useAuthAndDb = () => {
-    // NOTE: In a real application, this is where Firebase would be initialized
-    // using __firebase_config and __initial_auth_token.
-    const [userId, setUserId] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(true); // Mock readiness
+/** Auth Hook - Now using real Supabase */
+const useAuth = () => {
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Mocking authentication check
-        const mockSignIn = () => {
-            // Simulate successful sign-in
-            setUserId(crypto.randomUUID());
-        };
+        // Get initial session
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+            setLoading(false);
+        });
 
-        if (typeof __initial_auth_token !== 'undefined') {
-            // Actual Firebase sign-in with custom token logic goes here
-            mockSignIn();
-        } else {
-            // Actual Firebase anonymous sign-in logic goes here
-            mockSignIn();
-        }
+        // Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
     }, []);
 
-    return { userId, isAuthReady };
+    return { user, loading };
 };
 
-
-/** * HELPER COMPONENT: Tab for Mode Selection
- */
+/** Mode Tab Component */
 const ModeTab = ({ mode, currentMode, setMode, label }) => {
     const isActive = mode === currentMode;
     return (
@@ -52,37 +46,30 @@ const ModeTab = ({ mode, currentMode, setMode, label }) => {
     );
 };
 
-
-/** * PUBLIC VERIFICATION PORTAL 
- */
+/** PUBLIC VERIFICATION PORTAL */
 const PublicVerificationPortal = ({ setView }) => {
     const [certId, setCertId] = useState('');
     const [verificationResult, setVerificationResult] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [verificationMode, setVerificationMode] = useState('manual');
-    const [cameraStatus, setCameraStatus] = useState('idle'); // 'idle', 'requested', 'active', 'error'
+    const [cameraStatus, setCameraStatus] = useState('idle');
+    const [uploadedFile, setUploadedFile] = useState(null);
     
-    // Hooks for Camera Access
-    const videoRef = useRef(null); // Ref to hold the HTML <video> element
-    const [videoStream, setVideoStream] = useState(null); // State to hold the MediaStream object
+    const videoRef = useRef(null);
+    const [videoStream, setVideoStream] = useState(null);
 
-    // Function to stop the camera stream and clean up
     const stopCamera = useCallback(() => {
         if (videoStream) {
             videoStream.getTracks().forEach(track => track.stop());
             setVideoStream(null);
             setCameraStatus('idle');
-            console.log("Camera stream stopped and cleaned up.");
         }
     }, [videoStream]);
 
-    // Effect for cleanup: Stops the camera when the component unmounts
     useEffect(() => {
         return () => stopCamera();
     }, [stopCamera]);
 
-
-    // Actual Camera Access Logic
     const handleCameraRequest = async () => {
         if (cameraStatus === 'active') {
             stopCamera();
@@ -103,74 +90,95 @@ const PublicVerificationPortal = ({ setView }) => {
             
             setVideoStream(stream);
             setCameraStatus('active');
-
         } catch (error) {
             setCameraStatus('error');
             setVideoStream(null);
-            console.error("Camera access denied or failed.", error);
+            console.error("Camera access denied:", error);
         }
     };
 
-
-    // Mock verification logic
-    const handleVerify = (e) => {
+    // Real verification via API
+    const handleVerify = async (e) => {
         e.preventDefault();
         setIsLoading(true);
         setVerificationResult(null);
 
-        // Mock verification delay
-        setTimeout(() => {
+        try {
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+            const response = await fetch(`${apiUrl}/api/verify/id/${certId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            const data = await response.json();
+            setVerificationResult(data);
+        } catch (error) {
+            console.error('Verification error:', error);
+            setVerificationResult({
+                status: 'Error',
+                message: 'Failed to verify certificate. Please try again.'
+            });
+        } finally {
             setIsLoading(false);
-            if (certId.toLowerCase().includes('valid')) {
-                setVerificationResult({
-                    status: 'Verified',
-                    name: 'Jane Doe',
-                    certificate: 'Cloud Security Expert',
-                    issueDate: '2025-05-10',
-                    authority: 'TechCert Global',
-                });
-            } else if (certId.toLowerCase().includes('expired')) {
-                setVerificationResult({
-                    status: 'Expired',
-                    name: 'John Smith',
-                    certificate: 'Data Analysis Professional',
-                    issueDate: '2022-01-01',
-                    expiryDate: '2024-01-01',
-                    authority: 'Data Guild',
-                });
-            } else {
-                setVerificationResult({ status: 'NotFound' });
-            }
-        }, 1500);
+        }
+    };
+
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploadedFile(file);
+        setIsLoading(true);
+        setVerificationResult(null);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+            const response = await fetch(`${apiUrl}/api/verify/file`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            setVerificationResult(data);
+        } catch (error) {
+            console.error('Upload verification error:', error);
+            setVerificationResult({
+                status: 'Error',
+                message: 'Failed to verify certificate file. Please try again.'
+            });
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const renderResult = () => {
         if (!verificationResult) return null;
 
-        const { status, name, certificate, issueDate, expiryDate, authority } = verificationResult;
+        const { status, message, details } = verificationResult;
 
         const statusClasses = {
             Verified: 'bg-green-100 text-green-800 border-green-400',
             Expired: 'bg-yellow-100 text-yellow-800 border-yellow-400',
             NotFound: 'bg-red-100 text-red-800 border-red-400',
-        };
-
-        const statusText = {
-            Verified: 'VERIFIED: This certificate is authentic and active.',
-            Expired: 'EXPIRED: This certificate is authentic but has expired.',
-            NotFound: 'NOT FOUND: No matching active certificate found for this ID.',
+            Revoked: 'bg-red-100 text-red-800 border-red-400',
+            Error: 'bg-gray-100 text-gray-800 border-gray-400',
         };
 
         return (
             <div className={`mt-8 p-6 rounded-lg border-l-4 shadow-md ${statusClasses[status] || 'bg-gray-100 text-gray-800 border-gray-400'}`}>
-                <h3 className="text-xl font-bold mb-3">{statusText[status]}</h3>
-                {status !== 'NotFound' && (
+                <h3 className="text-xl font-bold mb-3">{message}</h3>
+                {details && (
                     <div className="space-y-2 text-sm">
-                        <p><strong>Holder Name:</strong> {name}</p>
-                        <p><strong>Credential:</strong> {certificate}</p>
-                        <p><strong>Issuing Authority:</strong> {authority}</p>
-                        <p><strong>Issue Date:</strong> {issueDate}</p>
-                        {expiryDate && <p><strong>Expiry Date:</strong> {expiryDate}</p>}
+                        {details.device_name && <p><strong>Device:</strong> {details.device_name}</p>}
+                        {details.device_model && <p><strong>Model:</strong> {details.device_model}</p>}
+                        {details.wipe_method && <p><strong>Wipe Method:</strong> {details.wipe_method}</p>}
+                        {details.wipe_date && <p><strong>Wipe Date:</strong> {new Date(details.wipe_date).toLocaleDateString()}</p>}
+                        {details.status && <p><strong>Status:</strong> {details.status}</p>}
                     </div>
                 )}
             </div>
@@ -182,40 +190,31 @@ const PublicVerificationPortal = ({ setView }) => {
             case 'pdf':
                 return (
                     <div className="space-y-6">
-                        {/* PDF Upload Box */}
                         <div className="border-2 border-dashed border-indigo-300 p-8 rounded-xl text-center bg-indigo-50 hover:bg-indigo-100 transition duration-150 cursor-pointer">
                             <input 
                                 type="file" 
-                                accept=".pdf" 
+                                accept=".pdf,.json" 
                                 className="hidden" 
                                 id="pdf-upload"
-                                onChange={(e) => console.log('PDF selected:', e.target.files[0].name)}
+                                onChange={handleFileUpload}
                             />
                             <label htmlFor="pdf-upload" className="block cursor-pointer">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-10 w-10 text-indigo-500 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 014 4v2a4 4 0 00-3.5-3.966M16 12h2a2 2 0 012 2v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5a2 2 0 012-2h2m4-7v12m0 0l-4-4m4 4l4-4" />
                                 </svg>
-                                <p className="text-gray-700 font-semibold">Click or drag a PDF file here</p>
-                                <p className="text-sm text-gray-500 mt-1">Accepts only .pdf certificates for verification.</p>
+                                <p className="text-gray-700 font-semibold">Click or drag a certificate file here</p>
+                                <p className="text-sm text-gray-500 mt-1">Accepts PDF or JSON certificates</p>
+                                {uploadedFile && <p className="text-sm text-indigo-600 mt-2">Selected: {uploadedFile.name}</p>}
                             </label>
                         </div>
-                        <button 
-                            type="button" 
-                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg"
-                            onClick={() => console.log("Mock: Processing PDF...")}
-                        >
-                            Process PDF Verification
-                        </button>
                     </div>
                 );
             case 'camera':
                 return (
                     <div className="space-y-6 text-center">
-                        {/* Camera Access/Scanning Area */}
                         <div className="p-1 border-4 border-dashed border-gray-300 rounded-xl bg-black h-96 flex flex-col items-center justify-center relative overflow-hidden">
                             {cameraStatus === 'active' ? (
                                 <>
-                                    {/* The video element for the live stream */}
                                     <video 
                                         ref={videoRef} 
                                         autoPlay 
@@ -223,7 +222,6 @@ const PublicVerificationPortal = ({ setView }) => {
                                         className="w-full h-full object-cover rounded-lg"
                                         onLoadedMetadata={() => videoRef.current.play()}
                                     />
-                                    {/* QR Code Overlay Simulation */}
                                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                         <div className="w-3/4 h-3/4 border-4 border-green-500 rounded-lg animate-pulse" style={{boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)'}}></div>
                                         <p className="absolute text-white bottom-4 font-semibold text-lg bg-black bg-opacity-50 px-3 py-1 rounded">Scanning Live Feed...</p>
@@ -233,7 +231,7 @@ const PublicVerificationPortal = ({ setView }) => {
                                 <p className="text-gray-400 font-medium">Click the button below to start the camera and scan a QR code.</p>
                             ) : cameraStatus === 'requested' ? (
                                 <p className="text-indigo-400 animate-pulse font-medium">Awaiting camera permission...</p>
-                            ) : ( // cameraStatus === 'error'
+                            ) : (
                                 <p className="text-red-500 font-medium p-4">
                                     Access Denied. Please ensure your browser permissions allow camera use and try again.
                                 </p>
@@ -256,7 +254,6 @@ const PublicVerificationPortal = ({ setView }) => {
                 );
             case 'manual':
             default:
-                // Manual Input Box
                 return (
                     <form onSubmit={handleVerify} className="space-y-6">
                         <div>
@@ -265,7 +262,7 @@ const PublicVerificationPortal = ({ setView }) => {
                                 type="text"
                                 id="cert-id"
                                 className={INPUT_CLASS}
-                                placeholder="e.g., TECH-2024-VALID-12345"
+                                placeholder="e.g., CERT-A1B2C3D4E5F6G7H8"
                                 value={certId}
                                 onChange={(e) => setCertId(e.target.value)}
                                 required
@@ -296,7 +293,6 @@ const PublicVerificationPortal = ({ setView }) => {
     
     return (
         <div className="flex items-center justify-center w-full flex-grow py-12">
-            {/* Card width increased to accommodate three tabs */}
             <div className={CARD_CLASS.replace('max-w-md', 'max-w-2xl')}> 
                 <h2 className="text-3xl font-extrabold text-center text-indigo-700 mb-2">
                     Public Certificate Verification
@@ -305,7 +301,6 @@ const PublicVerificationPortal = ({ setView }) => {
                     Choose a method to verify the authenticity of your document.
                 </p>
 
-                {/* Mode Selector Tabs */}
                 <div className="flex justify-center mb-8 bg-gray-100 p-1 rounded-xl shadow-inner">
                     <ModeTab 
                         mode="manual" 
@@ -317,7 +312,7 @@ const PublicVerificationPortal = ({ setView }) => {
                         mode="pdf" 
                         currentMode={verificationMode} 
                         setMode={setVerificationMode}
-                        label="PDF Upload"
+                        label="File Upload"
                     />
                     <ModeTab 
                         mode="camera" 
@@ -328,7 +323,6 @@ const PublicVerificationPortal = ({ setView }) => {
                 </div>
 
                 {renderModeContent()}
-
                 {renderResult()}
                 
                 <div className="text-center mt-8 pt-6 border-t border-gray-100">
@@ -344,16 +338,38 @@ const PublicVerificationPortal = ({ setView }) => {
     );
 };
 
+/** LOGIN PAGE */
 const LoginPage = ({ setView, setIsAuthenticated }) => {
-    const handleSubmit = (e) => {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Mock authentication success
-        setIsAuthenticated(true);
-        setView('dashboard'); // Navigate to dashboard after login
+        setIsLoading(true);
+        setError('');
+
+        try {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (error) throw error;
+
+            if (data.user) {
+                setIsAuthenticated(true);
+                setView('dashboard');
+            }
+        } catch (error) {
+            setError(error.message);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
-        // Wrapper to center the card vertically and horizontally within its parent
         <div className="flex items-center justify-center w-full flex-grow py-12">
             <div className={CARD_CLASS}>
                 <h2 className="text-3xl font-extrabold text-center text-blue-700 mb-2">
@@ -361,15 +377,37 @@ const LoginPage = ({ setView, setIsAuthenticated }) => {
                 </h2>
                 <p className="text-center text-gray-500 mb-8">Sign in to manage your certificates.</p>
 
+                {error && (
+                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                        {error}
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div>
                         <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
-                        <input type="text" id="email" className={INPUT_CLASS} placeholder="user@example.com" required />
+                        <input 
+                            type="email" 
+                            id="email" 
+                            className={INPUT_CLASS} 
+                            placeholder="user@example.com" 
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required 
+                        />
                     </div>
                     
                     <div>
                         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                        <input type="password" id="password" className={INPUT_CLASS} placeholder="••••••••" required />
+                        <input 
+                            type="password" 
+                            id="password" 
+                            className={INPUT_CLASS} 
+                            placeholder="••••••••" 
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required 
+                        />
                     </div>
                     
                     <div className="flex justify-end mb-4">
@@ -382,21 +420,14 @@ const LoginPage = ({ setView, setIsAuthenticated }) => {
                         </button>
                     </div>
 
-                    <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg">
-                        Log In
+                    <button 
+                        type="submit" 
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg disabled:bg-gray-400"
+                        disabled={isLoading}
+                    >
+                        {isLoading ? 'Logging in...' : 'Log In'}
                     </button>
                 </form>
-                
-                {/* REMOVED: Public Verification Button 
-                <button 
-                    type="button" 
-                    className="w-full mt-4 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg"
-                    onClick={() => setView('public')}
-                >
-                    Public Verification Portal
-                </button>
-                */}
-
 
                 <div className="mt-8 pt-6 border-t border-gray-100 space-y-4">
                     <div className="text-center text-sm">
@@ -414,11 +445,62 @@ const LoginPage = ({ setView, setIsAuthenticated }) => {
     );
 };
 
+/** REGISTER PAGE */
 const RegisterPage = ({ setView }) => {
-    const handleSubmit = (e) => {
+    const [formData, setFormData] = useState({
+        email: '',
+        password: '',
+        confirmPassword: '',
+        fullName: ''
+    });
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Mock registration, redirects to login
-        setView('login');
+        
+        if (formData.password !== formData.confirmPassword) {
+            setError("Passwords don't match");
+            return;
+        }
+
+        setIsLoading(true);
+        setError('');
+
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email: formData.email,
+                password: formData.password,
+                options: {
+                    data: {
+                        full_name: formData.fullName,
+                    }
+                }
+            });
+
+            if (error) throw error;
+
+            // Create user profile
+            if (data.user) {
+                const { error: profileError } = await supabase
+                    .from('user_profiles')
+                    .insert([
+                        { 
+                            id: data.user.id, 
+                            full_name: formData.fullName 
+                        }
+                    ]);
+
+                if (profileError) console.error('Profile creation error:', profileError);
+            }
+
+            alert('Registration successful! Please check your email to verify your account.');
+            setView('login');
+        } catch (error) {
+            setError(error.message);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -428,24 +510,72 @@ const RegisterPage = ({ setView }) => {
                     Create Account
                 </h2>
                 <p className="text-center text-gray-500 mb-8">Join the certification management platform.</p>
+
+                {error && (
+                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                        {error}
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div>
-                        <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                        <input type="text" id="username" className={INPUT_CLASS} placeholder="Your Name" required />
+                        <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                        <input 
+                            type="text" 
+                            id="fullName" 
+                            className={INPUT_CLASS} 
+                            placeholder="Your Name" 
+                            value={formData.fullName}
+                            onChange={(e) => setFormData({...formData, fullName: e.target.value})}
+                            required 
+                        />
                     </div>
                     
                     <div>
                         <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                        <input type="email" id="email" className={INPUT_CLASS} placeholder="user@example.com" required />
+                        <input 
+                            type="email" 
+                            id="email" 
+                            className={INPUT_CLASS} 
+                            placeholder="user@example.com" 
+                            value={formData.email}
+                            onChange={(e) => setFormData({...formData, email: e.target.value})}
+                            required 
+                        />
                     </div>
                     
                     <div>
                         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                        <input type="password" id="password" className={INPUT_CLASS} placeholder="••••••••" required />
+                        <input 
+                            type="password" 
+                            id="password" 
+                            className={INPUT_CLASS} 
+                            placeholder="••••••••" 
+                            value={formData.password}
+                            onChange={(e) => setFormData({...formData, password: e.target.value})}
+                            required 
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                        <input 
+                            type="password" 
+                            id="confirmPassword" 
+                            className={INPUT_CLASS} 
+                            placeholder="••••••••" 
+                            value={formData.confirmPassword}
+                            onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+                            required 
+                        />
                     </div>
                     
-                    <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg mt-6">
-                        Register
+                    <button 
+                        type="submit" 
+                        className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg mt-6 disabled:bg-gray-400"
+                        disabled={isLoading}
+                    >
+                        {isLoading ? 'Creating Account...' : 'Register'}
                     </button>
                 </form>
                 <div className="text-center mt-6 pt-4 border-t border-gray-100">
@@ -461,12 +591,32 @@ const RegisterPage = ({ setView }) => {
     );
 };
 
+/** FORGOT PASSWORD */
 const ForgotPassword = ({ setView }) => {
-    const handleSubmit = (e) => {
+    const [email, setEmail] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [message, setMessage] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Use custom message box instead of alert()
-        console.log("Password reset link sent (mock)");
-        setView('login');
+        setIsLoading(true);
+        setError('');
+        setMessage('');
+
+        try {
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/reset-password`,
+            });
+
+            if (error) throw error;
+
+            setMessage('Password reset link sent! Check your email.');
+        } catch (error) {
+            setError(error.message);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -477,14 +627,38 @@ const ForgotPassword = ({ setView }) => {
                 </h2>
                 <p className="text-center text-gray-500 mb-8">Enter your email to receive a password reset link.</p>
                 
+                {message && (
+                    <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded-lg">
+                        {message}
+                    </div>
+                )}
+
+                {error && (
+                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                        {error}
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div>
                         <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
-                        <input type="email" id="email" className={INPUT_CLASS} placeholder="user@example.com" required />
+                        <input 
+                            type="email" 
+                            id="email" 
+                            className={INPUT_CLASS} 
+                            placeholder="user@example.com" 
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required 
+                        />
                     </div>
                     
-                    <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg mt-6">
-                        Send Reset Link
+                    <button 
+                        type="submit" 
+                        className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-lg transition duration-150 shadow-lg mt-6 disabled:bg-gray-400"
+                        disabled={isLoading}
+                    >
+                        {isLoading ? 'Sending...' : 'Send Reset Link'}
                     </button>
                 </form>
                 <div className="text-center mt-6 pt-4 border-t border-gray-100">
@@ -500,128 +674,178 @@ const ForgotPassword = ({ setView }) => {
     );
 };
 
-
+/** USER DASHBOARD */
 const UserDashboard = () => {
-    const { userId, isAuthReady } = useAuthAndDb();
-    
-    // Mock Data
-    const mockCertificates = [
-        { id: 1, name: "Data Science Mastery", issueDate: "2023-08-15", status: "Verified" },
-        { id: 2, name: "Web Development Pro", issueDate: "2024-01-20", status: "Pending" },
-        { id: 3, name: "Cloud Architect Associate", issueDate: "2023-11-01", status: "Rejected" },
-    ];
+    const { user } = useAuth();
+    const [certificates, setCertificates] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    if (!isAuthReady) return <div className="loading-state">Loading user data...</div>;
+    useEffect(() => {
+        if (user) {
+            fetchCertificates();
+        }
+    }, [user]);
+
+    const fetchCertificates = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('certificates')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            setCertificates(data || []);
+        } catch (error) {
+            console.error('Error fetching certificates:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center w-full h-64">
+                <div className="text-gray-500">Loading certificates...</div>
+            </div>
+        );
+    }
 
     return (
-        // The dashboard is now centered using mx-auto and max-w-4xl
         <div className="p-4 sm:p-8 w-full max-w-4xl mx-auto"> 
             <h1 className="text-3xl font-bold mb-4 text-center text-gray-800">My Certificate Dashboard</h1>
             
-            {/* Centered User ID Display */}
             <div className="text-center mb-6 p-3 bg-gray-100 rounded-lg max-w-lg mx-auto">
                 <p className="text-sm font-medium text-gray-500">
-                    User ID: <span className="font-mono text-gray-700 select-all break-words">{userId || 'N/A'}</span>
+                    User: <span className="font-mono text-gray-700">{user?.email}</span>
                 </p>
             </div>
 
             <div className="bg-white p-6 sm:p-8 rounded-xl shadow-xl border border-gray-200">
                 <div className="flex flex-col sm:flex-row justify-between items-center mb-6 pb-4 border-b border-gray-100">
-                    <h2 className="text-2xl font-semibold text-gray-700 mb-3 sm:mb-0">Submitted Certificates</h2>
-                    
-                    <div className="flex space-x-4"> 
-                        <button className="px-4 py-2 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition duration-150 shadow-sm">
-                            <span className="hidden sm:inline">Upload </span>New Certificate
-                        </button>
-                        <button className="px-4 py-2 text-sm bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition duration-150 shadow-md">
-                            View Reports
-                        </button>
-                    </div>
+                    <h2 className="text-2xl font-semibold text-gray-700 mb-3 sm:mb-0">My Certificates</h2>
                 </div>
 
-                {/* Responsive Table for Certificates */}
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Certificate Name</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issue Date</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-48">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {mockCertificates.map(cert => (
-                                <tr key={cert.id} className="hover:bg-blue-50 transition duration-150">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{cert.name}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{cert.issueDate}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                            cert.status === 'Verified' ? 'bg-green-100 text-green-800' :
-                                            cert.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                                            'bg-red-100 text-red-800'
-                                        }`}>
-                                            {cert.status}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                                        <div className="flex justify-center space-x-2">
-                                            <button className="text-xs px-3 py-1 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition duration-150">
-                                                View
-                                            </button>
-                                            <button className="text-xs px-3 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition duration-150">
-                                                Delete
-                                            </button>
-                                        </div>
-                                    </td>
+                {certificates.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                        No certificates found. Your wiped devices will appear here.
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div className="text-center mt-6 p-4 bg-yellow-50 text-yellow-800 rounded-lg shadow-inner max-w-4xl mx-auto text-sm">
-                <p>Note: Certificates with 'Pending' status are currently under review by the authority.</p>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {certificates.map(cert => (
+                                    <tr key={cert.id} className="hover:bg-blue-50 transition duration-150">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                            {cert.device_name || 'Unknown Device'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {cert.wipe_method}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {new Date(cert.created_at).toLocaleDateString()}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                                cert.status === 'verified' ? 'bg-green-100 text-green-800' :
+                                                cert.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                                cert.status === 'revoked' ? 'bg-red-100 text-red-800' :
+                                                'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {cert.status}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
+                                            <div className="flex justify-center space-x-2">
+                                                <a
+                                                    href={cert.pdf_url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs px-3 py-1 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition duration-150"
+                                                >
+                                                    View PDF
+                                                </a>
+                                                <a
+                                                    href={cert.json_url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-150"
+                                                >
+                                                    JSON
+                                                </a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         </div>
     );
 };
 
-
-/**
- * MAIN APPLICATION COMPONENT
- */
+/** MAIN APP */
 const App = () => {
-    // Initial view is set to 'login' as requested.
     const [view, setView] = useState('login'); 
     const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const { user, loading } = useAuth();
 
-    // Simple navigation function
-    const navigateTo = (newView) => {
-        setView(newView);
+    useEffect(() => {
+        if (user) {
+            setIsAuthenticated(true);
+            if (view === 'login' || view === 'register') {
+                setView('dashboard');
+            }
+        } else {
+            setIsAuthenticated(false);
+            if (view === 'dashboard') {
+                setView('login');
+            }
+        }
+    }, [user]);
+
+    const handleLogout = async () => {
+        await supabase.auth.signOut();
+        setIsAuthenticated(false);
+        setView('login');
     };
 
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+                <div className="text-gray-500">Loading...</div>
+            </div>
+        );
+    }
+
     const renderContent = () => {
-        // Unauthenticated views
         if (!isAuthenticated) {
             switch (view) {
                 case 'register':
-                    return <RegisterPage setView={navigateTo} />;
+                    return <RegisterPage setView={setView} />;
                 case 'forgot-password':
-                    return <ForgotPassword setView={navigateTo} />;
-                case 'public': // Public portal is now a separate, unauthenticated page
-                    return <PublicVerificationPortal setView={navigateTo} />;
+                    return <ForgotPassword setView={setView} />;
+                case 'public':
+                    return <PublicVerificationPortal setView={setView} />;
                 case 'login':
                 default:
-                    return <LoginPage setView={navigateTo} setIsAuthenticated={setIsAuthenticated} />;
+                    return <LoginPage setView={setView} setIsAuthenticated={setIsAuthenticated} />;
             }
         }
         
-        // Authenticated users
         switch (view) {
-            case 'public': // Allow authenticated users to view public portal too
-                return <PublicVerificationPortal setView={navigateTo} />;
+            case 'public':
+                return <PublicVerificationPortal setView={setView} />;
             case 'dashboard':
             default:
                 return <UserDashboard />;
@@ -629,30 +853,25 @@ const App = () => {
     };
 
     return (
-        // Global Centering and Full Screen Background
         <div className="flex flex-col items-center justify-center bg-gray-50 min-h-screen w-full p-4 sm:p-8 font-sans">
             <div className="w-full max-w-6xl">
                 <div className="w-full"> 
-                    
-                    {/* Header/Navigation Area */}
                     <header className="flex justify-end p-4 sm:p-6 pb-2">
                         <div className='flex space-x-4 items-center'>
                             {!isAuthenticated ? (
                                 <>
-                                    {/* Public Verification Link in Header (The only way to access it now) */}
                                     {view !== 'public' && view !== 'login' && view !== 'register' && view !== 'forgot-password' && (
                                         <button
-                                            onClick={() => navigateTo('public')}
+                                            onClick={() => setView('public')}
                                             className="px-4 py-2 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-50 transition duration-150 border border-indigo-600"
                                         >
                                             Public Verification
                                         </button>
                                     )}
                                     
-                                    {/* Show Log In button only if not currently on Login or Register pages */}
                                     {(view !== 'login' && view !== 'register' && view !== 'forgot-password') && (
                                         <button
-                                            onClick={() => navigateTo('login')}
+                                            onClick={() => setView('login')}
                                             className="px-4 py-2 text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition duration-150 border border-blue-600"
                                         >
                                             Log In
@@ -660,11 +879,10 @@ const App = () => {
                                     )}
                                 </>
                             ) : (
-                                // Authenticated Navigation
                                 <>
                                     {view !== 'dashboard' && (
                                         <button 
-                                            onClick={() => navigateTo('dashboard')}
+                                            onClick={() => setView('dashboard')}
                                             className="px-4 py-2 text-gray-600 font-semibold rounded-lg hover:bg-gray-100 transition duration-150"
                                         >
                                             Dashboard
@@ -673,7 +891,7 @@ const App = () => {
                                     
                                     {view !== 'public' && (
                                         <button 
-                                            onClick={() => navigateTo('public')}
+                                            onClick={() => setView('public')}
                                             className="px-4 py-2 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-50 transition duration-150 border border-indigo-600"
                                         >
                                             Public Verification
@@ -681,10 +899,7 @@ const App = () => {
                                     )}
                                     
                                     <button 
-                                        onClick={() => {
-                                            setIsAuthenticated(false);
-                                            navigateTo('login'); // Redirect to login on logout
-                                        }}
+                                        onClick={handleLogout}
                                         className='px-6 py-2 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-600 transition duration-150'
                                     >
                                         Logout
@@ -694,11 +909,9 @@ const App = () => {
                         </div>
                     </header>
                     
-                    {/* Main Content Rendered Here - always centered */}
                     <main className="flex-grow flex flex-col justify-center items-center">
                         {renderContent()}
                     </main>
-
                 </div>
             </div>
         </div>

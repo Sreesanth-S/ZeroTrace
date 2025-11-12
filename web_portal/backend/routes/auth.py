@@ -94,3 +94,32 @@ def update_profile():
     except Exception as e:
         current_app.logger.error(f"Profile update error: {e}")
         return jsonify({'error': 'Failed to update profile'}), 500
+
+
+@auth_bp.route('/signup', methods=['POST'])
+def signup():
+    """Sign up user with profile creation"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['email', 'password', 'full_name']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return jsonify({'error': f'{field} is required'}), 400
+        
+        email = data['email']
+        password = data['password']
+        full_name = data['full_name']
+        
+        # Use backend signup method
+        result = current_app.supabase.signup_with_profile(email, password, full_name)
+        
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            return jsonify({'error': result['error']}), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Signup route error: {e}")
+        return jsonify({'error': 'Failed to create account'}), 500

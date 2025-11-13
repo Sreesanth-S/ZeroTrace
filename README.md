@@ -11,4 +11,4 @@ ZeroTrace is a secure, cross-platform data wiping solution that enables users to
 - User dashboard showing wiped devices  
 - PIN-protected application access  
 - Offline usage (bootable ISO) and online usage with sync  
-- PostgreSQL backend for storing user, device, certificate data  
+- Supabase backend for storing user, device, certificate data  

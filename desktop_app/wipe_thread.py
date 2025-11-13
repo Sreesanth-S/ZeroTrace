@@ -13,6 +13,7 @@ class WipeThread(QThread):
         self.method = method
         self.confirm = confirm
         self.wipe_engine = WipeEngine()
+        self._stop_requested = False
 
     def run(self):
         try:

@@ -57,11 +57,11 @@ class WipeEngine:
         
     def get_available_drives(self) -> List[DeviceInfo]:
         """
-        Get list of available external/removable physical drives with detailed information
-        For safety, only external USB drives are included to prevent accidental wiping of system drives
+        Get list of available removable physical drives with detailed information
+        Filters out system/internal drives for safety
 
         Returns:
-            List of DeviceInfo objects for external drives only
+            List of DeviceInfo objects for removable drives only
         """
         drives = []
 
@@ -69,24 +69,43 @@ class WipeEngine:
             # Get physical drives using WMI
             for physical_disk in self.wmi.Win32_DiskDrive():
                 try:
-                    # For safety, only include external USB drives
-                    interface_type = physical_disk.InterfaceType or ""
-                    media_type = physical_disk.MediaType or ""
+                    # Skip system/internal drives for safety
+                    media_type = getattr(physical_disk, 'MediaType', '').lower()
+                    interface_type = getattr(physical_disk, 'InterfaceType', '').lower()
+                    device_id = physical_disk.DeviceID or ""
 
-                    # Only include USB drives or removable media
-                    if interface_type.upper() == "USB" or "REMOVABLE" in media_type.upper():
+                    # Check if this is a removable/external drive
+                    is_removable = (
+                        'removable' in media_type or
+                        'external' in media_type or
+                        interface_type == 'usb' or
+                        'usb' in (physical_disk.Caption or '').lower() or
+                        'usb' in (physical_disk.Model or '').lower()
+                    )
+
+                    # Skip system drives (usually PHYSICALDRIVE0 and internal SSDs)
+                    is_system_drive = (
+                        device_id.endswith('PHYSICALDRIVE0') or
+                        'ssd' in (physical_disk.Caption or '').lower() or
+                        'ssd' in (physical_disk.Model or '').lower() or
+                        'nvme' in (physical_disk.Caption or '').lower() or
+                        'nvme' in (physical_disk.Model or '').lower()
+                    )
+
+                    # Only include removable drives, exclude system drives
+                    if is_removable and not is_system_drive:
                         device_info = DeviceInfo(
-                            path=physical_disk.DeviceID,  # e.g., \\.\PHYSICALDRIVE0
-                            name=physical_disk.Caption or physical_disk.Model or "Unknown Drive",
+                            path=device_id,  # e.g., \\.\PHYSICALDRIVE1
+                            name=physical_disk.Caption or physical_disk.Model or "Removable Drive",
                             size=int(physical_disk.Size) if physical_disk.Size else 0,
                             serial=physical_disk.SerialNumber or "",
                             model=physical_disk.Model or ""
                         )
 
                         drives.append(device_info)
-                        logger.debug(f"Found external drive: {device_info.name} ({device_info.size_gb:.2f} GB)")
+                        logger.debug(f"Found removable drive: {device_info.name} ({device_info.size_gb:.2f} GB) - {media_type}")
                     else:
-                        logger.debug(f"Skipping internal drive: {physical_disk.Caption} (Interface: {interface_type}, Media: {media_type})")
+                        logger.debug(f"Skipped drive: {physical_disk.Caption} - MediaType: {media_type}, Interface: {interface_type}, System: {is_system_drive}")
 
                 except Exception as e:
                     logger.error(f"Error getting drive info: {e}")
@@ -108,10 +127,10 @@ class WipeEngine:
     def validate_drive_access(self, device_path: str) -> tuple[bool, str]:
         """
         Validate that we can access the drive
-
+        
         Args:
-            device_path: Physical drive path (e.g., \\\\.\\PHYSICALDRIVE0)
-
+    device_path: Physical drive path (e.g., \\\\.\\PHYSICALDRIVE0)
+            
         Returns:
             Tuple of (success, error_message)
         """
@@ -205,7 +224,7 @@ class WipeEngine:
                 # Determine number of passes based on method
                 if method == WipeMethod.QUICK:
                     passes = [WipePattern.ZEROS]
-                elif method == WipeMethod.DOD_3_PASS or method == 'secure':
+                elif method == WipeMethod.DOD_3_PASS:
                     passes = [WipePattern.ZEROS, WipePattern.ONES, WipePattern.RANDOM]
                 elif method == WipeMethod.DOD_7_PASS:
                     passes = [WipePattern.ZEROS, WipePattern.ONES, WipePattern.RANDOM,

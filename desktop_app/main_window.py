@@ -179,7 +179,7 @@ class ZeroTraceMainWindow(QMainWindow):
         # Get available drives from wipe engine
         drives = self.wipe_engine.get_available_drives()
         for drive in drives:
-            self.drive_combo.addItem(drive)
+            self.drive_combo.addItem(drive.name, drive)
     
     def start_wipe(self):
         """Start the drive wiping process"""
@@ -199,8 +199,9 @@ class ZeroTraceMainWindow(QMainWindow):
                 self.drive_combo.setEnabled(False)
 
                 # Create and start wipe thread
+                device_info = self.drive_combo.currentData()
                 self.wipe_thread = WipeThread(
-                    self.drive_combo.currentText(),
+                    device_info,
                     'secure',
                     True
                 )
@@ -236,7 +237,7 @@ class ZeroTraceMainWindow(QMainWindow):
         """Update the status label"""
         self.status_label.setText(status)
 
-    def wipe_finished(self, log_path):
+    def wipe_finished(self, result):
         """Handle wipe completion"""
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -244,12 +245,27 @@ class ZeroTraceMainWindow(QMainWindow):
         self.drive_combo.setEnabled(True)
         self.wipe_thread = None
 
-        QMessageBox.information(
-            self,
-            "Wipe Complete",
-            f"Drive wiping process has completed.\nLog saved to: {log_path}",
-            QMessageBox.Ok
-        )
+        if result['success']:
+            QMessageBox.information(
+                self,
+                "Wipe Complete",
+                f"Drive wiping process has completed successfully.\n"
+                f"Device: {result['device_name']}\n"
+                f"Method: {result['method']}\n"
+                f"Duration: {result['duration']}\n"
+                f"Passes: {result['passes_completed']}\n"
+                f"Hash: {result['completion_hash']}",
+                QMessageBox.Ok
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Wipe Incomplete",
+                f"Drive wiping process was {result['status']}.\n"
+                f"Device: {result['device_name']}\n"
+                f"Error: {result['error']}",
+                QMessageBox.Ok
+            )
 
     def wipe_failed(self, error_message):
         """Handle wipe failure"""

@@ -25,3 +25,9 @@ pytest==7.4.3
 pytest-flask==1.3.0
 black==23.12.1
 flake8==6.1.0
+
+# Additional Utilities
+bcrypt==4.1.2
+wmi==1.5.1
+psutil==5.9.6
+PyInstaller==6.3.0

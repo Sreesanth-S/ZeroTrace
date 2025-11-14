@@ -11,7 +11,8 @@ certificates/*.pem
 certificates/*.key
 keys/*.pem
 keys/*.key
-desktop_app/keys/*.pem
-desktop_app/keys/*.key
 node_modules/
 dist/
+keys/
+*.pem
+*.key

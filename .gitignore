@@ -16,4 +16,5 @@ dist/
 keys/
 public_key.pem
 private_key.pem
-*.key
+*.key  
+*.pem

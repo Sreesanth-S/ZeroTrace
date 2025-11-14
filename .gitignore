@@ -14,5 +14,6 @@ keys/*.key
 node_modules/
 dist/
 keys/
-*.pem
+public_key.pem
+private_key.pem
 *.key

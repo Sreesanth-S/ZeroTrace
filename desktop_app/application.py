@@ -1,4 +1,5 @@
-from imports import *
+from PyQt5.QtWidgets import QDialog, QApplication,QMessageBox 
+from PyQt5.QtCore import QSettings
 from dialogs import LoginDialog, PinDialog
 from main_window import ZeroTraceMainWindow
 

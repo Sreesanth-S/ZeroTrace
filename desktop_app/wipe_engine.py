@@ -1,4 +1,4 @@
-# desktop_app/wipe_engine_enhanced.py
+# desktop_app/wipe_engine.py
 """
 Enhanced wipe engine with proper Windows API integration
 Supports physical drive access with administrator privileges
@@ -9,14 +9,13 @@ import win32api
 import win32file
 import win32con
 import wmi
-import psutil
 import random
 import time
 import hashlib
-from pathlib import Path
 from typing import List, Dict, Optional, Callable
 from datetime import datetime
 from logger import logger
+import struct
 
 
 class WipeMethod:
@@ -47,13 +46,14 @@ class DeviceInfo:
 
 class WipeEngine:
     """Enhanced drive wiping engine with Windows API support"""
-    
+
     def __init__(self):
         self._stop_requested = False
         self._current_progress = 0
         self._sector_size = 512
         self._buffer_size = 1024 * 1024  # 1MB buffer
         self.wmi = wmi.WMI()
+        self._volume_handles = []  # Track volume handles for cleanup
         
     def get_available_drives(self) -> List[DeviceInfo]:
         """
@@ -123,14 +123,281 @@ class WipeEngine:
             if drive.path == path:
                 return drive
         return None
+
+    def _get_volumes_for_drive(self, device_path: str) -> List[str]:
+        volumes = []
+        try:
+            # Extract drive number from path (e.g., PHYSICALDRIVE1 -> 1)
+            drive_num = int(device_path.split('PHYSICALDRIVE')[-1])
+
+            # Method 1: Use Windows API to enumerate volumes
+            try:
+                # Get all drive letters
+                import string
+                for letter in string.ascii_uppercase:
+                    drive_letter = f"{letter}:"
+                    volume_path = f"\\\\.\\{drive_letter}"
+
+                    try:
+                        # Try to get volume information
+                        volume_info = win32api.GetVolumeInformation(volume_path)
+                        # Check if this volume belongs to our physical drive
+                        # by comparing the drive number
+                        if self._is_volume_on_drive(volume_path, drive_num):
+                            volumes.append(volume_path)
+                            logger.debug(f"Found volume {volume_path} on drive {drive_num}")
+                    except:
+                        continue
+            except Exception as e:
+                logger.warning(f"Windows API method failed for drive {device_path}: {e}")
+
+            # Method 2: Fallback to WMI if Windows API fails
+            if not volumes:
+                try:
+                    # Try WMI with simpler queries
+                    for volume in self.wmi.Win32_Volume():
+                        if volume.DriveLetter:
+                            try:
+                                # Get disk extents for this volume
+                                for extent in volume.associators("Win32_DiskPartition"):
+                                    if extent.DiskIndex == drive_num:
+                                        volumes.append(f"\\\\.\\{volume.DriveLetter}:")
+                                        break
+                            except:
+                                continue
+                except Exception as e:
+                    logger.warning(f"WMI fallback failed for drive {device_path}: {e}")
+
+            # Method 3: Direct partition enumeration as final fallback
+            if not volumes:
+                try:
+                    # Enumerate partitions directly
+                    for partition in self.wmi.Win32_DiskPartition():
+                        if partition.DiskIndex == drive_num:
+                            # Find logical disks for this partition
+                            for logical_disk in partition.associators("Win32_LogicalDisk"):
+                                if logical_disk.DeviceID:
+                                    volumes.append(f"\\\\.\\{logical_disk.DeviceID}:")
+                                    logger.debug(f"Found volume {logical_disk.DeviceID} via partition enumeration")
+                except Exception as e:
+                    logger.warning(f"Direct partition enumeration failed for drive {device_path}: {e}")
+
+            logger.debug(f"Found {len(volumes)} volumes for drive {device_path}: {volumes}")
+
+        except Exception as e:
+            logger.error(f"Error getting volumes for drive {device_path}: {e}")
+
+        return volumes
+
+    def _is_volume_on_drive(self, volume_path: str, drive_num: int) -> bool:
+        """Check if a volume is on the specified physical drive"""
+        try:
+            # Get volume disk extents using DeviceIoControl
+            handle = win32file.CreateFile(
+                volume_path,
+                win32con.GENERIC_READ,
+                win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+                None,
+                win32con.OPEN_EXISTING,
+                0,
+                None
+            )
+
+            try:
+                # IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS
+                extents = win32file.DeviceIoControl(
+                    handle,
+                    0x560000,  # IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS
+                    None,
+                    1024
+                )
+
+                # Parse the extents structure
+                # The structure contains disk number at offset 8
+                if len(extents) >= 12:
+                    disk_num = struct.unpack('<I', extents[8:12])[0]
+                    return disk_num == drive_num
+
+            finally:
+                win32file.CloseHandle(handle)
+
+        except Exception as e:
+            logger.debug(f"Failed to check if volume {volume_path} is on drive {drive_num}: {e}")
+
+        return False
+
+    def _lock_volume(self, volume_path: str) -> Optional[int]:
+        """
+        Lock a volume to prevent access during wipe
+
+        Args:
+            volume_path: Volume path (e.g., \\\\.\\C:)
+
+        Returns:
+            Handle to the locked volume, or None if failed
+        """
+        try:
+            # Open volume handle
+            handle = win32file.CreateFile(
+                volume_path,
+                win32con.GENERIC_WRITE | win32con.GENERIC_READ,
+                win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+                None,
+                win32con.OPEN_EXISTING,
+                win32con.FILE_FLAG_NO_BUFFERING | win32con.FILE_FLAG_WRITE_THROUGH,
+                None
+            )
+
+            # Lock the volume
+            win32file.DeviceIoControl(
+                handle,
+                0x90018,  # FSCTL_LOCK_VOLUME
+                None,
+                None
+            )
+
+            # Dismount the volume
+            win32file.DeviceIoControl(
+                handle,
+                0x90020,  # FSCTL_DISMOUNT_VOLUME
+                None,
+                None
+            )
+
+            logger.debug(f"Successfully locked and dismounted volume: {volume_path}")
+            return handle
+
+        except Exception as e:
+            logger.error(f"Failed to lock volume {volume_path}: {e}")
+            if 'handle' in locals():
+                try:
+                    win32file.CloseHandle(handle)
+                except:
+                    pass
+            return None
+
+    def _unlock_volume(self, handle: int):
+        """Unlock a previously locked volume"""
+        try:
+            win32file.DeviceIoControl(
+                handle,
+                0x9001C,  # FSCTL_UNLOCK_VOLUME
+                None,
+                None
+            )
+            win32file.CloseHandle(handle)
+            logger.debug("Successfully unlocked volume")
+        except Exception as e:
+            logger.error(f"Failed to unlock volume: {e}")
+
+    def _dismount_drive_volumes(self, device_path: str) -> int:
+        r"""
+        Dismount all volumes on a physical drive using Windows API
+
+        Args:
+            device_path: Physical drive path (e.g., \\.\PHYSICALDRIVE1)
+
+        Returns:
+            Number of volumes successfully dismounted
+        """
+        dismounted_count = 0
+        try:
+            volumes = self._get_volumes_for_drive(device_path)
+
+            for volume_path in volumes:
+                try:
+                    # Try to dismount the volume
+                    win32api.SetVolumeMountPoint(volume_path[:-1], None)  # Remove drive letter
+                    logger.debug(f"Successfully dismounted volume: {volume_path}")
+                    dismounted_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to dismount volume {volume_path}: {e}")
+                    # Try alternative method using DeviceIoControl
+                    try:
+                        handle = win32file.CreateFile(
+                            volume_path,
+                            win32con.GENERIC_READ | win32con.GENERIC_WRITE,
+                            win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+                            None,
+                            win32con.OPEN_EXISTING,
+                            0,
+                            None
+                        )
+                        try:
+                            win32file.DeviceIoControl(
+                                handle,
+                                0x90020,  # FSCTL_DISMOUNT_VOLUME
+                                None,
+                                None
+                            )
+                            logger.debug(f"Successfully dismounted volume {volume_path} using DeviceIoControl")
+                            dismounted_count += 1
+                        finally:
+                            win32file.CloseHandle(handle)
+                    except Exception as e2:
+                        logger.warning(f"Failed to dismount volume {volume_path} using DeviceIoControl: {e2}")
+
+        except Exception as e:
+            logger.error(f"Error dismounting volumes for drive {device_path}: {e}")
+
+        return dismounted_count
+
+    def _offline_disk(self, device_path: str):
+        r"""
+        Offline the disk using diskpart command
+
+        Args:
+            device_path: Physical drive path (e.g., \\.\PHYSICALDRIVE1)
+        """
+        try:
+            # Extract drive number
+            drive_num = int(device_path.split('PHYSICALDRIVE')[-1])
+
+            # Create diskpart script
+            script_content = f"""
+select disk {drive_num}
+offline disk
+"""
+
+            # Write script to temp file
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(script_content)
+                script_path = f.name
+
+            try:
+                # Run diskpart
+                import subprocess
+                result = subprocess.run(
+                    ['diskpart', '/s', script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+
+                if result.returncode == 0:
+                    logger.debug("Diskpart offline command succeeded")
+                else:
+                    logger.warning(f"Diskpart offline command failed: {result.stderr}")
+
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(script_path)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Failed to offline disk {device_path}: {e}")
+            raise
     
     def validate_drive_access(self, device_path: str) -> tuple[bool, str]:
-        """
+        r"""
         Validate that we can access the drive
-        
+
         Args:
-    device_path: Physical drive path (e.g., \\\\.\\PHYSICALDRIVE0)
-            
+            device_path: Physical drive path (e.g., \\\\.\\\\PHYSICALDRIVE0)
+
         Returns:
             Tuple of (success, error_message)
         """
@@ -197,7 +464,7 @@ class WipeEngine:
         
         try:
             logger.log_wipe_start(device_info.name, method)
-            
+
             # Validate access first
             can_access, error_msg = self.validate_drive_access(device_info.path)
             if not can_access:
@@ -205,21 +472,106 @@ class WipeEngine:
                 result['status'] = 'Failed'
                 logger.error(f"Drive validation failed: {error_msg}")
                 return result
-            
-            # Open drive for writing
+
+            # Open drive for writing first
             if progress_callback:
                 progress_callback(0, "Opening drive...")
-            
-            handle = win32file.CreateFile(
-                device_info.path,
-                win32con.GENERIC_WRITE,
-                0,  # Exclusive access
-                None,
-                win32con.OPEN_EXISTING,
-                0,
-                None
-            )
-            
+
+            # Try to open drive with different access modes if needed
+            handle = None
+            try:
+                handle = win32file.CreateFile(
+                    device_info.path,
+                    win32con.GENERIC_WRITE,
+                    0,  # Exclusive access
+                    None,
+                    win32con.OPEN_EXISTING,
+                    win32con.FILE_FLAG_NO_BUFFERING | win32con.FILE_FLAG_WRITE_THROUGH,
+                    None
+                )
+            except Exception as e:
+                error_code = getattr(e, 'winerror', None)
+                if error_code == 5:  # Access Denied
+                    logger.warning("Exclusive access failed, trying shared access...")
+                    # Try with shared access as fallback
+                    try:
+                        handle = win32file.CreateFile(
+                            device_info.path,
+                            win32con.GENERIC_WRITE,
+                            win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+                            None,
+                            win32con.OPEN_EXISTING,
+                            0,
+                            None
+                        )
+                        logger.warning("Opened drive with shared access - data integrity may be compromised")
+                    except Exception as e2:
+                        logger.error(f"Failed to open drive even with shared access: {e2}")
+                        raise e  # Re-raise original error
+                else:
+                    raise
+
+            # Check if drive is write-protected
+            try:
+                win32file.DeviceIoControl(
+                    handle,
+                    0x70000,  # IOCTL_DISK_IS_WRITABLE
+                    None,
+                    None
+                )
+                logger.debug("Drive is writable")
+            except Exception as e:
+                result['error'] = "Drive is write-protected"
+                result['status'] = 'Failed'
+                logger.error("Drive is write-protected")
+                win32file.CloseHandle(handle)
+                return result
+
+            # Try to dismount volumes using multiple methods
+            if progress_callback:
+                progress_callback(0, "Dismounting volumes...")
+
+            # Method 1: Try to dismount all volumes on the drive
+            volumes_dismounted = self._dismount_drive_volumes(device_info.path)
+            if volumes_dismounted:
+                logger.info(f"Successfully dismounted {volumes_dismounted} volumes")
+            else:
+                logger.warning("No volumes were dismounted")
+
+            # Method 2: Try to offline the disk using diskpart
+            try:
+                self._offline_disk(device_info.path)
+                logger.info("Successfully offlined disk")
+            except Exception as e:
+                logger.warning(f"Failed to offline disk: {e}")
+
+            # Now try to lock and dismount the physical drive directly
+            if progress_callback:
+                progress_callback(0, "Locking drive...")
+
+            try:
+                # Lock the physical drive
+                win32file.DeviceIoControl(
+                    handle,
+                    0x90018,  # FSCTL_LOCK_VOLUME
+                    None,
+                    None
+                )
+                logger.info("Successfully locked physical drive")
+
+                # Dismount the physical drive
+                win32file.DeviceIoControl(
+                    handle,
+                    0x90020,  # FSCTL_DISMOUNT_VOLUME
+                    None,
+                    None
+                )
+                logger.info("Successfully dismounted physical drive")
+
+            except Exception as e:
+                logger.warning(f"Failed to lock/dismount physical drive: {e}")
+                # Continue anyway - some drives may not support this
+
             try:
                 # Determine number of passes based on method
                 if method == WipeMethod.QUICK:
@@ -261,23 +613,46 @@ class WipeEngine:
                 
             finally:
                 win32file.CloseHandle(handle)
-                
+
+                # Unlock volumes after wipe
+                if progress_callback:
+                    progress_callback(98, "Unlocking volumes...")
+
+                for vol_handle in self._volume_handles:
+                    try:
+                        self._unlock_volume(vol_handle)
+                    except Exception as e:
+                        logger.error(f"Failed to unlock volume handle {vol_handle}: {e}")
+
+                self._volume_handles.clear()
+
         except Exception as e:
             logger.log_error_with_context("Wipe operation", e)
             result['error'] = str(e)
             result['status'] = 'Failed'
-        
+
+        # Ensure volumes are unlocked even on failure
+        try:
+            for vol_handle in self._volume_handles:
+                try:
+                    self._unlock_volume(vol_handle)
+                except Exception as e:
+                    logger.error(f"Failed to unlock volume handle {vol_handle} during cleanup: {e}")
+            self._volume_handles.clear()
+        except:
+            pass
+
         # Record end time and duration
         end_time = datetime.now()
         result['end_time'] = end_time.isoformat()
         duration = end_time - start_time
         result['duration'] = str(duration)
-        
+
         logger.log_wipe_complete(device_info.name, result['status'], result['duration'])
-        
+
         if progress_callback:
             progress_callback(100, f"Wipe {result['status']}")
-        
+
         return result
     
     def _wipe_pass(self, handle, drive_size: int, pattern: int,
@@ -297,12 +672,12 @@ class WipeEngine:
         while bytes_written < drive_size and not self._stop_requested:
             # Calculate remaining bytes
             bytes_to_write = min(self._buffer_size, drive_size - bytes_written)
-            
+
             if bytes_to_write < self._buffer_size:
                 write_buffer = buffer[:bytes_to_write]
             else:
                 write_buffer = buffer
-            
+
             # Write to drive
             error_code, _ = win32file.WriteFile(handle, write_buffer)
             if error_code != 0:
@@ -336,6 +711,17 @@ class WipeEngine:
         """Stop the wiping process"""
         logger.info("Wipe stop requested")
         self._stop_requested = True
+
+        # Also unlock any locked volumes immediately
+        try:
+            for vol_handle in self._volume_handles:
+                try:
+                    self._unlock_volume(vol_handle)
+                except Exception as e:
+                    logger.error(f"Failed to unlock volume handle {vol_handle} during stop: {e}")
+            self._volume_handles.clear()
+        except:
+            pass
     
     def get_progress(self) -> int:
         """Get current wiping progress (0-100)"""

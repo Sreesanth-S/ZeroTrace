@@ -1,4 +1,6 @@
-from imports import *
+from PyQt5.QtWidgets import QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QMessageBox, QProgressBar, QWidget, QComboBox, QGroupBox,QStyle
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 from wipe_engine import WipeEngine
 from wipe_thread import WipeThread
 

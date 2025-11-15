@@ -1,4 +1,4 @@
-from imports import *
+from PyQt5.QtCore import QThread, pyqtSignal
 from wipe_engine import WipeEngine
 
 class WipeThread(QThread):

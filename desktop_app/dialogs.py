@@ -1,4 +1,6 @@
-from imports import *
+from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout, QLineEdit, QMessageBox, QDialogButtonBox, QGroupBox, QStyle
+from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtGui import QFont
 
 class LoginDialog(QDialog):
     """Login dialog for user authentication"""

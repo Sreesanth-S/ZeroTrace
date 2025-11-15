@@ -324,7 +324,7 @@ const PublicVerificationPortal = ({ setView }) => {
 
                 {renderModeContent()}
                 {renderResult()}
-                
+{/*                 
                 <div className="text-center mt-8 pt-6 border-t border-gray-100">
                     <button 
                         className="text-sm font-medium text-blue-600 hover:text-blue-800 transition duration-150"
@@ -332,7 +332,7 @@ const PublicVerificationPortal = ({ setView }) => {
                     >
                         &larr; Back to Login / Management
                     </button>
-                </div>
+                </div> */}
             </div>
         </div>
     );
@@ -432,11 +432,19 @@ const LoginPage = ({ setView, setIsAuthenticated }) => {
                 <div className="mt-8 pt-6 border-t border-gray-100 space-y-4">
                     <div className="text-center text-sm">
                         <p className="text-gray-600">Don't have an account?</p>
-                        <button 
+                        <button
                             className="font-medium text-green-600 hover:text-green-700 transition duration-150"
                             onClick={() => setView('register')}
                         >
                             Create Account
+                        </button>
+                    </div>
+                    <div className="text-center">
+                        <button
+                            className="text-sm font-medium text-indigo-600 hover:text-indigo-800 transition duration-150"
+                            onClick={() => setView('public')}
+                        >
+                            &larr; Back to Public Verification
                         </button>
                     </div>
                 </div>
@@ -796,7 +804,7 @@ const UserDashboard = () => {
 
 /** MAIN APP */
 const App = () => {
-    const [view, setView] = useState('login'); 
+    const [view, setView] = useState('public');
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const { user, loading } = useAuth();
 

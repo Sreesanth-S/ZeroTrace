@@ -1,6 +1,6 @@
 // web_portal/frontend/src/App.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, getCurrentUser } from './Lib/supabase';
+import { supabase, getCurrentUser } from './lib/supabase';
 
 // Helper Tailwind classes
 const INPUT_CLASS = "block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150";
@@ -324,8 +324,8 @@ const PublicVerificationPortal = ({ setView }) => {
 
                 {renderModeContent()}
                 {renderResult()}
-{/*                 
-                <div className="text-center mt-8 pt-6 border-t border-gray-100">
+                
+                {/* <div className="text-center mt-8 pt-6 border-t border-gray-100">
                     <button 
                         className="text-sm font-medium text-blue-600 hover:text-blue-800 transition duration-150"
                         onClick={() => setView('login')}
@@ -439,14 +439,14 @@ const LoginPage = ({ setView, setIsAuthenticated }) => {
                             Create Account
                         </button>
                     </div>
-                    <div className="text-center">
+                    {/* <div className="text-center">
                         <button
                             className="text-sm font-medium text-indigo-600 hover:text-indigo-800 transition duration-150"
                             onClick={() => setView('public')}
                         >
-                            &larr; Back to Public Verification
+                            &larr; Public Certificate Verification
                         </button>
-                    </div>
+                    </div> */}
                 </div>
             </div>
         </div>
@@ -591,7 +591,7 @@ const RegisterPage = ({ setView }) => {
                         className="text-sm font-medium text-blue-600 hover:text-blue-800 transition duration-150"
                         onClick={() => setView('login')}
                     >
-                        &larr; Already have an account? Sign In
+                        &larr; Already have an account? <br></br>Sign In
                     </button>
                 </div>
             </div>
@@ -763,9 +763,9 @@ const UserDashboard = () => {
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                                cert.status === 'verified' ? 'bg-green-100 text-green-800' :
-                                                cert.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                                                cert.status === 'revoked' ? 'bg-red-100 text-red-800' :
+                                                cert.status === 'Verified' ? 'bg-green-100 text-green-800' :
+                                                cert.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                                                cert.status === 'Revoked' ? 'bg-red-100 text-red-800' :
                                                 'bg-gray-100 text-gray-800'
                                             }`}>
                                                 {cert.status}
@@ -868,7 +868,7 @@ const App = () => {
                         <div className='flex space-x-4 items-center'>
                             {!isAuthenticated ? (
                                 <>
-                                    {view !== 'public' && view !== 'login' && view !== 'register' && view !== 'forgot-password' && (
+                                    {view !== 'public' && (
                                         <button
                                             onClick={() => setView('public')}
                                             className="px-4 py-2 text-indigo-600 font-semibold rounded-lg hover:bg-indigo-50 transition duration-150 border border-indigo-600"
@@ -876,7 +876,7 @@ const App = () => {
                                             Public Verification
                                         </button>
                                     )}
-                                    
+
                                     {(view !== 'login' && view !== 'register' && view !== 'forgot-password') && (
                                         <button
                                             onClick={() => setView('login')}

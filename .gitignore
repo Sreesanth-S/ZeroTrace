@@ -18,3 +18,29 @@ public_key.pem
 private_key.pem
 *.key  
 *.pem
+
+# Dependencies
+package-lock.json
+yarn.lock
+
+# Environment variables
+.env.local
+.env.production
+# Uploads
+uploads/
+*.pdf
+*.json
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# OS files
+.DS_Store
+Thumbs.db
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+# Build
+build/

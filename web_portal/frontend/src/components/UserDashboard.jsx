@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import CertificateList from './CertificateList';
 
 const UserDashboard = ({ userName = "User" }) => {
-  const [certifications, setCertifications] = useState([
-    { id: 'cert-12345', name: 'React Developer', issuer: 'Meta', status: 'Verified', url: 'https://your-domain.com/verify?id=cert-12345' },
-    { id: 'cert-67890', name: 'AWS Cloud Practitioner', issuer: 'Amazon', status: 'Pending', url: 'https://your-domain.com/verify?id=cert-67890' },
-  ]);
+  // const [certifications, setCertifications] = useState([
+  //   { id: 'cert-12345', name: 'React Developer', issuer: 'Meta', status: 'Verified', url: 'https://your-domain.com/verify?id=cert-12345' },
+  //   { id: 'cert-67890', name: 'AWS Cloud Practitioner', issuer: 'Amazon', status: 'Pending', url: 'https://your-domain.com/verify?id=cert-67890' },
+  // ]);
 
   return (
     <div className="dashboard-container">

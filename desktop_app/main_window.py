@@ -1,7 +1,7 @@
 # desktop_app/main_window.py
 from PyQt5.QtWidgets import (QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, 
                              QMessageBox, QProgressBar, QWidget, QComboBox, QGroupBox, 
-                             QStyle, QTextEdit, QSplitter, QDialog, QListWidget, QListWidgetItem)
+                             QStyle, QTextEdit)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QTextCursor
 from wipe_engine import WipeEngine, WipeMethod, DriveType

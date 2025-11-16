@@ -5,7 +5,6 @@ Supports ATA Secure Erase, NVMe Format/Sanitize, and software overwrite
 """
 
 import os
-import win32api
 import win32file
 import win32con
 import wmi
@@ -18,7 +17,8 @@ from typing import List, Dict, Optional, Callable, Tuple
 from datetime import datetime
 from logger import logger
 from enum import Enum
-
+import subprocess
+import tempfile
 
 class DriveType(Enum):
     """Drive type enumeration"""
@@ -28,6 +28,152 @@ class DriveType(Enum):
     NVME_SSD = "NVMe SSD"
     USB_FLASH = "USB Flash Drive"
 
+class DriveFormatter:
+    """Handle drive formatting after wipe operations"""
+    
+    @staticmethod
+    def detect_original_filesystem(device_path: str) -> Dict[str, any]:
+        """
+        Detect the original filesystem before wiping
+        Returns dict with filesystem info
+        """
+        try:
+            drive_num = int(device_path.split('PHYSICALDRIVE')[-1])
+            filesystem_info = {
+                'volumes': [],
+                'partition_style': 'MBR',  # Default
+                'has_partitions': False
+            }
+            
+            wmi_obj = wmi.WMI()
+            
+            # Get partition information
+            for partition in wmi_obj.Win32_DiskPartition():
+                if partition.DiskIndex == drive_num:
+                    filesystem_info['has_partitions'] = True
+                    
+                    # Get partition style (MBR or GPT)
+                    if hasattr(partition, 'Type'):
+                        if 'GPT' in partition.Type:
+                            filesystem_info['partition_style'] = 'GPT'
+                    
+                    # Get associated logical disks
+                    for logical_disk in partition.associators("Win32_LogicalDisk"):
+                        volume_info = {
+                            'drive_letter': logical_disk.DeviceID,
+                            'filesystem': logical_disk.FileSystem or 'NTFS',
+                            'label': logical_disk.VolumeName or 'DATA',
+                            'size': int(logical_disk.Size) if logical_disk.Size else 0
+                        }
+                        filesystem_info['volumes'].append(volume_info)
+            
+            logger.info(f"Detected filesystem info: {filesystem_info}")
+            return filesystem_info
+            
+        except Exception as e:
+            logger.error(f"Error detecting filesystem: {e}")
+            # Return safe defaults
+            return {
+                'volumes': [],
+                'partition_style': 'MBR',
+                'has_partitions': False
+            }
+    
+    @staticmethod
+    def format_drive(device_path: str, filesystem_info: Dict, 
+                     progress_callback: Optional[Callable] = None) -> bool:
+        try:
+            drive_num = int(device_path.split('PHYSICALDRIVE')[-1])
+            
+            if progress_callback:
+                progress_callback(90, "Creating partition table...")
+            
+            # Create diskpart script
+            script_lines = [
+                f"select disk {drive_num}",
+                "clean",  # Clean the disk first
+            ]
+            
+            # Create partition based on original style
+            if filesystem_info.get('partition_style') == 'GPT':
+                script_lines.append("convert gpt")
+                script_lines.append("create partition primary")
+            else:
+                script_lines.append("convert mbr")
+                script_lines.append("create partition primary")
+            
+            script_lines.extend([
+                "select partition 1",
+                "active"  # Set active for MBR
+            ])
+            
+            # Determine filesystem and label
+            if filesystem_info.get('volumes') and len(filesystem_info['volumes']) > 0:
+                volume = filesystem_info['volumes'][0]
+                fs_type = volume.get('filesystem', 'NTFS')
+                label = volume.get('label', 'DATA')
+            else:
+                # Defaults
+                fs_type = 'NTFS'
+                label = 'DATA'
+            
+            # Format the partition
+            if fs_type.upper() in ['NTFS', 'FAT32', 'EXFAT', 'FAT']:
+                format_cmd = f'format fs={fs_type} label="{label}" quick'
+            else:
+                # Fallback to NTFS
+                format_cmd = 'format fs=NTFS label="DATA" quick'
+            
+            script_lines.append(format_cmd)
+            script_lines.append("assign")  # Auto-assign drive letter
+            script_lines.append("exit")
+            
+            logger.info(f"Diskpart script: {script_lines}")
+            
+            if progress_callback:
+                progress_callback(92, "Writing partition table...")
+            
+            # Write script to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write('\n'.join(script_lines))
+                script_path = f.name
+            
+            try:
+                if progress_callback:
+                    progress_callback(95, f"Formatting as {fs_type}...")
+                
+                # Execute diskpart
+                result = subprocess.run(
+                    ['diskpart', '/s', script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+                
+                logger.info(f"Diskpart output: {result.stdout}")
+                
+                if result.returncode == 0:
+                    logger.info(f"Successfully formatted drive as {fs_type}")
+                    if progress_callback:
+                        progress_callback(98, "Format complete")
+                    return True
+                else:
+                    logger.error(f"Diskpart failed: {result.stderr}")
+                    return False
+                    
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(script_path)
+                except:
+                    pass
+                    
+        except subprocess.TimeoutExpired:
+            logger.error("Format operation timed out")
+            return False
+        except Exception as e:
+            logger.error(f"Format error: {e}")
+            return False
 
 class WipeMethod:
     """Wipe methods enumeration"""
@@ -441,8 +587,7 @@ class WipeEngine:
 
         return result
 
-    def _perform_ata_secure_erase(self, device_info: DeviceInfo, enhanced: bool,
-                                   progress_callback: Optional[Callable], result: Dict) -> Dict:
+    def _perform_ata_secure_erase(self, device_info: DeviceInfo, enhanced: bool, progress_callback: Optional[Callable], result: Dict) -> Dict:
         """Perform ATA Secure Erase"""
         try:
             if progress_callback:
@@ -498,7 +643,12 @@ class WipeEngine:
 
     def _perform_software_wipe(self, device_info: DeviceInfo, method: str,
                                 progress_callback: Optional[Callable], result: Dict) -> Dict:
-        """Perform software overwrite wipe"""
+        """Perform software overwrite wipe with automatic reformatting"""
+        
+        # Detect original filesystem BEFORE wiping
+        formatter = DriveFormatter()
+        filesystem_info = formatter.detect_original_filesystem(device_info.path)
+        
         try:
             if progress_callback:
                 progress_callback(0, "Opening drive...")
@@ -562,26 +712,50 @@ class WipeEngine:
 
                 total_passes = len(passes)
 
-                # Perform passes
+                # Perform wipe passes (0-90% of total progress)
                 for pass_num, pattern in enumerate(passes, 1):
                     if self._stop_requested:
                         result['status'] = 'Cancelled'
                         break
 
                     if progress_callback:
+                        base_progress = int((pass_num - 1) / total_passes * 90)
                         progress_callback(
-                            int((pass_num - 1) / total_passes * 100),
+                            base_progress,
                             f"Pass {pass_num}/{total_passes}: Writing {self._get_pattern_name(pattern)}"
                         )
 
-                    self._wipe_pass(handle, device_info.size, pattern, pass_num, total_passes, progress_callback)
+                    self._wipe_pass(handle, device_info.size, pattern, pass_num, total_passes, 
+                                   progress_callback, max_progress=90)
                     result['passes_completed'] = pass_num
 
                 if not self._stop_requested:
                     if progress_callback:
-                        progress_callback(95, "Generating verification hash...")
+                        progress_callback(90, "Generating verification hash...")
 
                     result['completion_hash'] = self._generate_completion_hash(device_info, result['method'])
+                    
+                    # Close handle before formatting
+                    win32file.CloseHandle(handle)
+                    handle = None
+                    
+                    # Format the drive (90-98% of progress)
+                    if progress_callback:
+                        progress_callback(90, "Reformatting drive...")
+                    
+                    logger.info(f"Reformatting drive with original filesystem: {filesystem_info}")
+                    format_success = formatter.format_drive(device_info.path, filesystem_info, 
+                                                            progress_callback)
+                    
+                    if format_success:
+                        logger.info("Drive formatted successfully")
+                        result['formatted'] = True
+                        result['filesystem'] = filesystem_info
+                    else:
+                        logger.warning("Format failed, but wipe was successful")
+                        result['formatted'] = False
+                        result['format_error'] = "Format failed - drive may need manual formatting"
+                    
                     result['status'] = 'Completed'
                     result['success'] = True
 
@@ -597,8 +771,14 @@ class WipeEngine:
         return result
 
     def _wipe_pass(self, handle, drive_size: int, pattern: int, pass_num: int, total_passes: int,
-                   progress_callback: Optional[Callable[[int, str], None]] = None):
-        """Perform a single wipe pass"""
+                   progress_callback: Optional[Callable[[int, str], None]] = None,
+                   max_progress: int = 100):
+        """
+        Perform a single wipe pass
+        
+        Args:
+            max_progress: Maximum progress percentage for wiping (e.g., 90 if formatting after)
+        """
         if pattern == WipePattern.ZEROS:
             buffer = bytes(self._buffer_size)
         elif pattern == WipePattern.ONES:
@@ -621,9 +801,9 @@ class WipeEngine:
 
             bytes_written += bytes_to_write
             
-            # Calculate overall progress
+            # Calculate progress within the max_progress limit
             pass_progress = (bytes_written / drive_size) * 100
-            overall_progress = ((pass_num - 1) / total_passes * 100) + (pass_progress / total_passes)
+            overall_progress = ((pass_num - 1) / total_passes * max_progress) + (pass_progress / total_passes * max_progress / 100)
             self._current_progress = int(overall_progress)
             
             # Update progress callback every 1%

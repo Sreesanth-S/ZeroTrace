@@ -15,12 +15,15 @@ class ZeroTraceMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ZeroTrace - Secure Drive Wiper")
         self.setMinimumSize(900, 700)
-        
+
+        # Disable close button (X button in title bar)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
+
         # Initialize wipe engine
         self.wipe_engine = WipeEngine()
         self.wipe_thread = None
         self.current_device = None
-        
+
         # Initialize UI components
         self.init_ui()
         
@@ -227,14 +230,14 @@ class ZeroTraceMainWindow(QMainWindow):
         button_group = QGroupBox("Actions")
         button_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
         button_layout = QHBoxLayout(button_group)
-        
+
         self.start_button = QPushButton("Start Wiping")
         self.start_button.setObjectName("startButton")
         self.start_button.setFont(QFont("Segoe UI", 10, QFont.Bold))
         self.start_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.start_button.clicked.connect(self.start_wipe)
         self.start_button.setMinimumHeight(40)
-        
+
         self.stop_button = QPushButton("Stop")
         self.stop_button.setObjectName("stopButton")
         self.stop_button.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -242,12 +245,20 @@ class ZeroTraceMainWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop_wipe)
         self.stop_button.setEnabled(False)
         self.stop_button.setMinimumHeight(40)
-        
+
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.setObjectName("logoutButton")
+        self.logout_button.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.logout_button.setIcon(self.style().standardIcon(QStyle.SP_DialogCloseButton))
+        self.logout_button.clicked.connect(self.logout)
+        self.logout_button.setMinimumHeight(40)
+
         button_layout.addStretch()
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.logout_button)
         button_layout.addStretch()
-        
+
         main_layout.addWidget(button_group)
         
         # Initialize drives list
@@ -530,3 +541,26 @@ class ZeroTraceMainWindow(QMainWindow):
             f"Please check the log for details.",
             QMessageBox.Ok
         )
+
+    def logout(self):
+        """Handle user logout"""
+        # Confirm logout
+        reply = QMessageBox.question(
+            self,
+            "Confirm Logout",
+            "Are you sure you want to logout?\n\n"
+            "Any ongoing operations will be stopped.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            self.log("User logged out")
+
+            # Stop any ongoing wipe operation
+            if self.wipe_thread and self.wipe_thread.isRunning():
+                self.wipe_thread.stop()
+                self.wipe_thread.wait()  # Wait for thread to finish
+
+            # Close the main window (this will return to login)
+            self.close()

@@ -1,8 +1,3 @@
-"""
-Supabase Client for Desktop Application
-Handles authentication and data synchronization with Supabase
-"""
-
 import os
 import json
 from pathlib import Path

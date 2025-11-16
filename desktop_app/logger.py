@@ -1,8 +1,3 @@
-# desktop_app/logger.py
-"""
-Centralized logging system for ZeroTrace Desktop Application
-"""
-
 import logging
 import os
 from pathlib import Path

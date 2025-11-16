@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-ZeroTrace Complete Desktop Application
-A fully functional device wiping and certification application
-
-Requirements:
-    pip install PyQt5 pycryptodome reportlab qrcode[pil] pillow
-
-Usage:
-    python3 zerotrace_app.py
-"""
 import sys, ctypes
 from pathlib import Path
 from application import ZeroTraceApplication

@@ -1,8 +1,3 @@
-"""
-Certificate Manager for Desktop Application
-Handles certificate generation, signing, and uploading
-"""
-
 import json
 from pathlib import Path
 from datetime import datetime

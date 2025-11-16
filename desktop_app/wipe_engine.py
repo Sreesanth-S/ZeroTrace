@@ -56,13 +56,6 @@ class WipeEngine:
         self._volume_handles = []  # Track volume handles for cleanup
         
     def get_available_drives(self) -> List[DeviceInfo]:
-        """
-        Get list of available removable physical drives with detailed information
-        Filters out system/internal drives for safety
-
-        Returns:
-            List of DeviceInfo objects for removable drives only
-        """
         drives = []
 
         try:
@@ -212,8 +205,6 @@ class WipeEngine:
                     1024
                 )
 
-                # Parse the extents structure
-                # The structure contains disk number at offset 8
                 if len(extents) >= 12:
                     disk_num = struct.unpack('<I', extents[8:12])[0]
                     return disk_num == drive_num
@@ -227,15 +218,6 @@ class WipeEngine:
         return False
 
     def _lock_volume(self, volume_path: str) -> Optional[int]:
-        """
-        Lock a volume to prevent access during wipe
-
-        Args:
-            volume_path: Volume path (e.g., \\\\.\\C:)
-
-        Returns:
-            Handle to the locked volume, or None if failed
-        """
         try:
             # Open volume handle
             handle = win32file.CreateFile(
@@ -291,15 +273,6 @@ class WipeEngine:
             logger.error(f"Failed to unlock volume: {e}")
 
     def _dismount_drive_volumes(self, device_path: str) -> int:
-        r"""
-        Dismount all volumes on a physical drive using Windows API
-
-        Args:
-            device_path: Physical drive path (e.g., \\.\PHYSICALDRIVE1)
-
-        Returns:
-            Number of volumes successfully dismounted
-        """
         dismounted_count = 0
         try:
             volumes = self._get_volumes_for_drive(device_path)
@@ -343,21 +316,12 @@ class WipeEngine:
         return dismounted_count
 
     def _offline_disk(self, device_path: str):
-        r"""
-        Offline the disk using diskpart command
-
-        Args:
-            device_path: Physical drive path (e.g., \\.\PHYSICALDRIVE1)
-        """
         try:
             # Extract drive number
             drive_num = int(device_path.split('PHYSICALDRIVE')[-1])
 
             # Create diskpart script
-            script_content = f"""
-select disk {drive_num}
-offline disk
-"""
+            script_content = f"""select disk {drive_num}offline disk"""
 
             # Write script to temp file
             import tempfile
@@ -392,15 +356,6 @@ offline disk
             raise
     
     def validate_drive_access(self, device_path: str) -> tuple[bool, str]:
-        r"""
-        Validate that we can access the drive
-
-        Args:
-            device_path: Physical drive path (e.g., \\\\.\\\\PHYSICALDRIVE0)
-
-        Returns:
-            Tuple of (success, error_message)
-        """
         try:
             # Try to open the device for reading
             handle = win32file.CreateFile(
@@ -427,19 +382,7 @@ offline disk
             else:
                 return False, f"Cannot access drive: {str(e)}"
     
-    def start_wipe(self, device_info: DeviceInfo, method: str, 
-                   progress_callback: Optional[Callable[[int, str], None]] = None) -> Dict:
-        """
-        Start secure wipe operation
-        
-        Args:
-            device_info: Device information
-            method: Wipe method to use
-            progress_callback: Optional callback for progress updates (progress%, message)
-            
-        Returns:
-            Dictionary with wipe results
-        """
+    def start_wipe(self, device_info: DeviceInfo, method: str, progress_callback: Optional[Callable[[int, str], None]] = None) -> Dict:
         self._stop_requested = False
         self._current_progress = 0
         

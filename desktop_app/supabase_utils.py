@@ -1,9 +1,4 @@
 # desktop_app/supabase_utils.py
-"""
-Supabase integration utilities for ZeroTrace Desktop Application
-Handles authentication, data storage, and certificate uploads
-"""
-
 import os
 from typing import Optional, Dict, Tuple
 from pathlib import Path
@@ -30,16 +25,6 @@ class SupabaseManager:
         self.session = None
     
     def sign_in(self, email: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
-        """
-        Sign in user with email and password
-        
-        Args:
-            email: User email
-            password: User password
-            
-        Returns:
-            Tuple of (success, message, user_data)
-        """
         try:
             response = self.client.auth.sign_in_with_password({
                 "email": email,
@@ -65,17 +50,6 @@ class SupabaseManager:
                 return False, f"Login failed: {error_msg}", None
     
     def sign_up(self, email: str, password: str, full_name: str) -> Tuple[bool, str]:
-        """
-        Register new user
-        
-        Args:
-            email: User email
-            password: User password
-            full_name: User's full name
-            
-        Returns:
-            Tuple of (success, message)
-        """
         try:
             response = self.client.auth.sign_up({
                 "email": email,
@@ -140,15 +114,6 @@ class SupabaseManager:
             return False
     
     def set_user_pin(self, pin: str) -> Tuple[bool, str]:
-        """
-        Hash and store user PIN in profile
-        
-        Args:
-            pin: 4-digit PIN
-            
-        Returns:
-            Tuple of (success, message)
-        """
         if not self.user:
             return False, "No user logged in"
         
@@ -167,15 +132,6 @@ class SupabaseManager:
             return False, f"Failed to set PIN: {str(e)}"
     
     def verify_user_pin(self, pin: str) -> bool:
-        """
-        Verify user PIN against stored hash
-        
-        Args:
-            pin: 4-digit PIN to verify
-            
-        Returns:
-            True if PIN matches, False otherwise
-        """
         if not self.user:
             return False
         
@@ -209,19 +165,7 @@ class SupabaseManager:
         except:
             return False
     
-    def upload_certificate_files(self, cert_id: str, json_path: Path, 
-                                 pdf_path: Path) -> Tuple[bool, str, Optional[Dict]]:
-        """
-        Upload certificate files to Supabase Storage
-        
-        Args:
-            cert_id: Certificate ID
-            json_path: Path to JSON certificate file
-            pdf_path: Path to PDF certificate file
-            
-        Returns:
-            Tuple of (success, message, urls_dict)
-        """
+    def upload_certificate_files(self, cert_id: str, json_path: Path, pdf_path: Path) -> Tuple[bool, str, Optional[Dict]]:
         if not self.user:
             return False, "No user logged in", None
         
@@ -260,15 +204,6 @@ class SupabaseManager:
             return False, f"Upload failed: {str(e)}", None
     
     def insert_certificate_record(self, cert_data: Dict) -> Tuple[bool, str, Optional[str]]:
-        """
-        Insert certificate metadata into database
-        
-        Args:
-            cert_data: Certificate data dictionary
-            
-        Returns:
-            Tuple of (success, message, record_id)
-        """
         if not self.user:
             return False, "No user logged in", None
         
@@ -300,15 +235,6 @@ class SupabaseManager:
             return False, f"Database insert failed: {str(e)}", None
     
     def get_user_certificates(self, limit: int = 50) -> Tuple[bool, str, Optional[list]]:
-        """
-        Get all certificates for current user
-        
-        Args:
-            limit: Maximum number of records to fetch
-            
-        Returns:
-            Tuple of (success, message, certificates_list)
-        """
         if not self.user:
             return False, "No user logged in", None
         

@@ -1,2 +1,0 @@
-D:\ZeroTrace\certificate_signer\build\Release\libcrypto-3-x64.dll
-D:\ZeroTrace\certificate_signer\build\certificate_signer.dir\Release\certific.60A51175.Up2Date

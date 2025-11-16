@@ -1,4 +1,0 @@
-D:/ZeroTrace/certificate_signer/build/CMakeFiles/certificate_signer.dir
-D:/ZeroTrace/certificate_signer/build/CMakeFiles/INSTALL.dir
-D:/ZeroTrace/certificate_signer/build/CMakeFiles/ALL_BUILD.dir
-D:/ZeroTrace/certificate_signer/build/CMakeFiles/ZERO_CHECK.dir

@@ -6,70 +6,99 @@ from certificate_manager import CertificateManager
 from logger import logger
 
 class ZeroTraceApplication(QApplication):
-    """Main application class"""
+    """Main application class with Supabase integration"""
     
     def __init__(self, argv):
         super().__init__(argv)
         self.setApplicationName("ZeroTrace")
         self.setApplicationVersion("1.0")
         self.setOrganizationName("ZeroTrace")
+        
         self.main_window = None
         self.supabase_client = None
+        self.user = None
     
     def authenticate_user(self):
-        """Handle user authentication"""
+        """Handle user authentication with Supabase"""
         # Login dialog
         login_dialog = LoginDialog()
         if login_dialog.exec_() != QDialog.Accepted:
             return False
         
-        # Initialize Supabase client (optional - can work offline)
-        try:
-            from supabase_client import SupabaseDesktopClient
-            self.supabase_client = SupabaseDesktopClient()
-            
-            # Try to sign in with credentials
-            username = login_dialog.username_edit.text()
-            password = login_dialog.password_edit.text()
-            
-            # Attempt Supabase login (non-blocking)
-            try:
-                self.supabase_client.sign_in(username, password)
-                logger.info(f"Logged in to Supabase: {username}")
-            except:
-                logger.warning("Supabase login failed - continuing in offline mode")
-                
-        except Exception as e:
-            logger.warning(f"Supabase not available: {e} - continuing in offline mode")
-            self.supabase_client = None
+        # Get user from login
+        self.user = login_dialog.user
+        self.supabase_client = login_dialog.supabase
         
-        # PIN setup/entry (existing code)
-        settings = QSettings("ZeroTrace", "Application")
-        stored_pin = settings.value("app_pin", "")
-        
-        if stored_pin:
-            pin_dialog = PinDialog(setup_mode=False)
-            if pin_dialog.exec_() != QDialog.Accepted:
-                return False
+        # Check if PIN is required
+        user_id = None
+        if self.user:
+            user_id = self.user.id
             
-            if pin_dialog.pin != stored_pin:
-                QMessageBox.critical(None, "Authentication Failed", "Incorrect PIN")
-                return False
+            # Check if user has PIN set in Supabase
+            has_pin = self.check_user_has_pin(user_id)
+            
+            if has_pin:
+                # PIN entry
+                pin_dialog = PinDialog(self.supabase_client, user_id, setup_mode=False)
+                if pin_dialog.exec_() != QDialog.Accepted:
+                    return False
+            else:
+                # PIN setup
+                pin_dialog = PinDialog(self.supabase_client, user_id, setup_mode=True)
+                if pin_dialog.exec_() != QDialog.Accepted:
+                    return False
         else:
-            pin_dialog = PinDialog(setup_mode=True)
-            if pin_dialog.exec_() != QDialog.Accepted:
-                return False
+            # Offline mode - use local PIN
+            settings = QSettings("ZeroTrace", "Application")
+            has_local_pin = settings.value("app_pin_hash", "") or settings.value("app_pin", "")
             
-            settings.setValue("app_pin", pin_dialog.pin)
+            if has_local_pin:
+                pin_dialog = PinDialog(None, None, setup_mode=False)
+                if pin_dialog.exec_() != QDialog.Accepted:
+                    return False
+            else:
+                pin_dialog = PinDialog(None, None, setup_mode=True)
+                if pin_dialog.exec_() != QDialog.Accepted:
+                    return False
         
         return True
+    
+    def check_user_has_pin(self, user_id: str) -> bool:
+        """Check if user has PIN set in Supabase"""
+        if not self.supabase_client:
+            print("No Supabase client available")
+            return False
+        
+        try:
+            response = self.supabase_client.table('user_profiles')\
+                .select('id, pin_hash')\
+                .eq('id', user_id)\
+                .execute()
+            
+            print(f"Check PIN response for {user_id}: {response.data}")
+            
+            if response.data and len(response.data) > 0:
+                pin_hash = response.data[0].get('pin_hash')
+                has_pin = bool(pin_hash)
+                print(f"User has PIN: {has_pin} (hash present: {pin_hash is not None})")
+                return has_pin
+            else:
+                print(f"No profile found for user {user_id}")
+                return False
+                
+        except Exception as e:
+            print(f"Error checking PIN: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def run(self):
         """Run the application"""
         if not self.authenticate_user():
             return 1
         
-        # Create main window and pass Supabase client
+        # Create main window
+        from main_window import ZeroTraceMainWindow
         self.main_window = ZeroTraceMainWindow(supabase_client=self.supabase_client)
         self.main_window.show()
         

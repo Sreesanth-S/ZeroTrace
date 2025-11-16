@@ -6,41 +6,36 @@ from logging.handlers import RotatingFileHandler
 
 class ZeroTraceLogger:
     """Singleton logger for the application"""
-    
+
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            cls._instance._init_logger()
         return cls._instance
-    
-    def __init__(self):
-        if self._initialized:
-            return
-        
-        self._initialized = True
-        
+
+    def _init_logger(self):
         # Create logs directory in AppData
         if os.name == 'nt':  # Windows
             app_data = os.getenv('APPDATA')
             log_dir = Path(app_data) / 'ZeroTrace' / 'logs'
         else:
             log_dir = Path.home() / '.zerotrace' / 'logs'
-        
+
         log_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Log file path
         log_file = log_dir / 'app.log'
-        
+
         # Create logger
         self.logger = logging.getLogger('ZeroTrace')
         self.logger.setLevel(logging.DEBUG)
-        
+
         # Prevent duplicate handlers
         if self.logger.handlers:
             return
-        
+
         # File handler with rotation (10MB max, keep 5 backups)
         file_handler = RotatingFileHandler(
             log_file,
@@ -49,23 +44,23 @@ class ZeroTraceLogger:
             encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)
-        
+
         # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
-        
+
         # Formatter
         formatter = logging.Formatter(
             '[%(asctime)s] [%(levelname)s] %(name)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        
+
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
-        
+
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
-        
+
         self.info(f"Logger initialized. Log file: {log_file}")
     
     def debug(self, message: str):

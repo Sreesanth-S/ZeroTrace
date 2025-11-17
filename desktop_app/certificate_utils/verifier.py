@@ -1,8 +1,3 @@
-"""
-Certificate Verification Utilities
-Handles verification of certificate authenticity and integrity
-"""
-
 import json
 from pathlib import Path
 from typing import Dict, Tuple, Optional
@@ -13,24 +8,9 @@ class CertificateVerifier:
     """Verify certificate authenticity and integrity"""
     
     def __init__(self, public_key_path: Optional[str] = None):
-        """
-        Initialize verifier
-        
-        Args:
-            public_key_path: Path to public key file
-        """
-        self.signer = CertificateSigner(public_key_path=public_key_path)
+         self.signer = CertificateSigner(public_key_path=public_key_path)
     
     def verify_certificate_file(self, cert_path: str) -> Tuple[bool, str, Optional[Dict]]:
-        """
-        Verify certificate from JSON file
-        
-        Args:
-            cert_path: Path to certificate JSON file
-            
-        Returns:
-            Tuple of (is_valid, message, cert_data)
-        """
         try:
             # Load certificate
             with open(cert_path, 'r') as f:
@@ -46,15 +26,6 @@ class CertificateVerifier:
             return False, f"Error reading certificate: {str(e)}", None
     
     def verify_certificate_data(self, cert_data: Dict) -> Tuple[bool, str, Dict]:
-        """
-        Verify certificate from data dictionary
-        
-        Args:
-            cert_data: Certificate data dictionary
-            
-        Returns:
-            Tuple of (is_valid, message, cert_data)
-        """
         # Check if signature exists
         if '_signature' not in cert_data:
             return False, "Certificate is not signed", cert_data
@@ -74,16 +45,6 @@ class CertificateVerifier:
         return True, "Certificate is valid and authentic", cert_data
     
     def verify_against_database(self, cert_data: Dict, db_record: Optional[Dict]) -> Tuple[bool, str]:
-        """
-        Verify certificate against database record
-        
-        Args:
-            cert_data: Certificate data from file/upload
-            db_record: Certificate record from database
-            
-        Returns:
-            Tuple of (is_valid, message)
-        """
         if not db_record:
             return False, "Certificate not found in database"
         
@@ -105,20 +66,6 @@ class CertificateVerifier:
         return True, "Certificate matches database record"
     
     def extract_pdf_metadata(self, pdf_path: str) -> Optional[Dict]:
-        """
-        Extract certificate metadata from PDF
-        
-        Args:
-            pdf_path: Path to PDF file
-            
-        Returns:
-            Certificate metadata if found, None otherwise
-        """
-        # This is a placeholder - in production, you would:
-        # 1. Use PyPDF2 or similar to extract custom metadata
-        # 2. Look for embedded JSON data
-        # 3. Extract QR code and decode data
-        
         try:
             # For now, look for accompanying JSON file
             json_path = Path(pdf_path).with_suffix('.json')
@@ -136,16 +83,6 @@ class VerificationResult:
     
     def __init__(self, is_valid: bool, message: str, cert_data: Optional[Dict] = None, 
                  db_match: bool = False, details: Optional[Dict] = None):
-        """
-        Initialize verification result
-        
-        Args:
-            is_valid: Whether certificate is valid
-            message: Verification message
-            cert_data: Certificate data
-            db_match: Whether certificate matches database
-            details: Additional verification details
-        """
         self.is_valid = is_valid
         self.message = message
         self.cert_data = cert_data

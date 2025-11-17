@@ -1,9 +1,3 @@
-# desktop_app/wipe_engine.py
-"""
-Enhanced wipe engine with hardware-level secure erase support
-Supports ATA Secure Erase, NVMe Format/Sanitize, and software overwrite
-"""
-
 import os
 import win32file
 import win32con
@@ -13,7 +7,7 @@ import time
 import hashlib
 import struct
 import ctypes
-from typing import List, Dict, Optional, Callable, Tuple
+from typing import List, Dict, Optional, Callable
 from datetime import datetime
 from logger import logger
 from enum import Enum
@@ -33,10 +27,6 @@ class DriveFormatter:
     
     @staticmethod
     def detect_original_filesystem(device_path: str) -> Dict[str, any]:
-        """
-        Detect the original filesystem before wiping
-        Returns dict with filesystem info
-        """
         try:
             drive_num = int(device_path.split('PHYSICALDRIVE')[-1])
             filesystem_info = {
@@ -273,15 +263,6 @@ class WipeEngine:
                     interface_type = getattr(physical_disk, 'InterfaceType', '').lower()
                     device_id = physical_disk.DeviceID or ""
 
-                    # Check if removable/external
-                    is_removable = (
-                        'removable' in media_type or
-                        'external' in media_type or
-                        interface_type == 'usb' or
-                        'usb' in (physical_disk.Caption or '').lower() or
-                        'usb' in (physical_disk.Model or '').lower()
-                    )
-
                     # Check if system drive
                     is_system_drive = (
                         device_id.endswith('PHYSICALDRIVE0') or
@@ -335,7 +316,7 @@ class WipeEngine:
         
         return False
 
-    def _detect_drive_capabilities(self, device_info: DeviceInfo, physical_disk):
+    def _detect_drive_capabilities(self, device_info: DeviceInfo):
         """Detect drive type and supported secure erase methods"""
         try:
             interface = device_info.bus_type.lower()
@@ -773,12 +754,6 @@ class WipeEngine:
     def _wipe_pass(self, handle, drive_size: int, pattern: int, pass_num: int, total_passes: int,
                    progress_callback: Optional[Callable[[int, str], None]] = None,
                    max_progress: int = 100):
-        """
-        Perform a single wipe pass
-        
-        Args:
-            max_progress: Maximum progress percentage for wiping (e.g., 90 if formatting after)
-        """
         if pattern == WipePattern.ZEROS:
             buffer = bytes(self._buffer_size)
         elif pattern == WipePattern.ONES:

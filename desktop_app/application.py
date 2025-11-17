@@ -1,9 +1,6 @@
-from PyQt5.QtWidgets import QDialog, QApplication,QMessageBox 
+from PyQt5.QtWidgets import QDialog, QApplication
 from PyQt5.QtCore import QSettings
 from dialogs import LoginDialog, PinDialog
-from main_window import ZeroTraceMainWindow
-from certificate_manager import CertificateManager
-from logger import logger
 
 class ZeroTraceApplication(QApplication):
     """Main application class with Supabase integration"""
@@ -97,9 +94,12 @@ class ZeroTraceApplication(QApplication):
         if not self.authenticate_user():
             return 1
         
-        # Create main window
+        # Create main window and pass both client and user
         from main_window import ZeroTraceMainWindow
-        self.main_window = ZeroTraceMainWindow(supabase_client=self.supabase_client)
+        self.main_window = ZeroTraceMainWindow(
+            supabase_client=self.supabase_client,
+            user=self.user  # Pass the authenticated user
+        )
         self.main_window.show()
         
         return self.exec_()

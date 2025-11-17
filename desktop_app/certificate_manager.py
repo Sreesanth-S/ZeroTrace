@@ -1,33 +1,49 @@
-import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, Tuple
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-
+from typing import Dict, Optional, Tuple, List
 from certificate_utils.signer import CertificateSigner, generate_cert_id
 from certificate_utils.pdf_generator import PDFCertificateGenerator
-from desktop_app.supabase_client import SupabaseDesktopClient
-
-import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from logger import logger
+import os
+import sys
+import json
 
+
+sys.path.append(str(Path(__file__).parent.parent))
 load_dotenv()
 
 class CertificateManager:
     """Manage certificate lifecycle in desktop application"""
     
-    def __init__(self, supabase_client: SupabaseDesktopClient):
+    def __init__(self, supabase_client):
         """
         Initialize certificate manager
         
         Args:
-            supabase_client: Initialized Supabase client
+            supabase_client: Initialized Supabase client (SupabaseDesktopClient or Client)
         """
-        self.supabase = supabase_client
+        # Get the underlying client if it's wrapped
+        if hasattr(supabase_client, 'client'):
+            self.supabase = supabase_client.client  # Use the underlying client
+            self.supabase_wrapper = supabase_client  # Keep wrapper for other methods
+        else:
+            self.supabase = supabase_client
+            self.supabase_wrapper = supabase_client
+        
         self.signer = CertificateSigner()
         self.pdf_generator = PDFCertificateGenerator()
+        
+        # Get current user from auth
+        self.user = None
+        if self.supabase:
+            try:
+                user_response = self.supabase.auth.get_user()
+                if user_response and hasattr(user_response, 'user'):
+                    self.user = user_response.user
+            except:
+                pass
         
         # Local storage paths
         self.local_certs_dir = Path("certificates")
@@ -46,6 +62,14 @@ class CertificateManager:
         # Generate certificate ID
         device_id = wipe_result.get('device_id', 'unknown')
         cert_id = generate_cert_id(device_id)
+        
+        # Get user info
+        user_id = 'local'
+        user_email = 'offline'
+        
+        if self.user:
+            user_id = self.user.id
+            user_email = self.user.email if hasattr(self.user, 'email') else 'unknown'
         
         # Build certificate data
         cert_data = {
@@ -68,26 +92,17 @@ class CertificateManager:
             'verification': {
                 'completion_hash': wipe_result.get('completion_hash', ''),
                 'method': 'SHA-256',
-                'verified': True
+                'Verified': True
             },
             'operator': {
-                'user_id': self.supabase.user.id if self.supabase.user else 'local',
-                'email': self.supabase.user.email if self.supabase.user else 'offline'
+                'user_id': user_id,
+                'email': user_email
             }
         }
         
         return cert_data
     
     def generate_and_sign_certificate(self, wipe_result: Dict) -> Tuple[Path, Path, Dict]:
-        """
-        Generate signed certificate files (JSON and PDF)
-        
-        Args:
-            wipe_result: Result from wipe operation
-            
-        Returns:
-            Tuple of (json_path, pdf_path, cert_data)
-        """
         # Create certificate data
         cert_data = self.create_certificate_data(wipe_result)
         
@@ -108,62 +123,117 @@ class CertificateManager:
     
     def upload_certificate(self, json_path: Path, pdf_path: Path, cert_data: Dict) -> bool:
         """
-        Upload certificate to Supabase
+        Upload certificate to Supabase storage and database
         
         Args:
             json_path: Path to JSON certificate
             pdf_path: Path to PDF certificate
-            cert_data: Certificate data
+            cert_data: Certificate data dictionary
             
         Returns:
             True if successful
         """
-        if not self.supabase.user:
-            print("User not logged in. Certificate saved locally only.")
+        if not self.user:
+            logger.warning("User not logged in. Certificate saved locally only.")
+            return False
+        
+        if not self.supabase:
+            logger.error("Supabase client not available")
             return False
         
         try:
-            # Upload files
-            upload_result = self.supabase.upload_certificate(
-                self.supabase.user.id,
-                cert_data['cert_id'],
-                json_path,
-                pdf_path
-            )
+            # Upload files to storage
+            bucket_name = 'certificates'
+            user_folder = self.user.id
+            cert_id = cert_data['cert_id']
             
-            if not upload_result['success']:
-                print(f"Upload failed: {upload_result.get('error')}")
+            logger.info(f"Uploading certificate {cert_id} for user {user_folder}")
+            
+            # Upload JSON file
+            json_remote_path = f"{user_folder}/{cert_id}.json"
+            with open(json_path, 'rb') as f:
+                json_data = f.read()
+            
+            try:
+                # Use the underlying client's storage API
+                json_response = self.supabase.storage.from_(bucket_name).upload(
+                    path=json_remote_path,
+                    file=json_data,
+                    file_options={
+                        "content-type": "application/json",
+                        "upsert": "true"
+                    }
+                )
+                logger.info(f"✓ JSON uploaded: {json_remote_path}")
+            except Exception as e:
+                logger.error(f"✗ JSON upload failed: {e}")
                 return False
             
-            # Add URLs to cert data
-            cert_data['json_url'] = upload_result['json_url']
-            cert_data['pdf_url'] = upload_result['pdf_url']
+            # Upload PDF file
+            pdf_remote_path = f"{user_folder}/{cert_id}.pdf"
+            with open(pdf_path, 'rb') as f:
+                pdf_data = f.read()
+            
+            try:
+                pdf_response = self.supabase.storage.from_(bucket_name).upload(
+                    path=pdf_remote_path,
+                    file=pdf_data,
+                    file_options={
+                        "content-type": "application/pdf",
+                        "upsert": "true"
+                    }
+                )
+                logger.info(f"✓ PDF uploaded: {pdf_remote_path}")
+            except Exception as e:
+                logger.error(f"✗ PDF upload failed: {e}")
+                return False
+            
+            # Get public URLs
+            json_url = self.supabase.storage.from_(bucket_name).get_public_url(json_remote_path)
+            pdf_url = self.supabase.storage.from_(bucket_name).get_public_url(pdf_remote_path)
+            
+            logger.info(f"✓ URLs generated")
             
             # Insert database record
-            record_id = self.supabase.insert_certificate_record(cert_data)
-            
-            if not record_id:
-                print("Failed to create database record")
+            try:
+                record = {
+                    'user_id': self.user.id,
+                    'device_id': cert_data.get('device_id', 'unknown'),
+                    'cert_id': cert_data['cert_id'],
+                    'device_name': cert_data.get('device', 'Unknown'),
+                    'device_model': cert_data.get('device_info', {}).get('model', 'N/A'),
+                    'device_serial': cert_data.get('device_info', {}).get('serial', 'N/A'),
+                    'wipe_method': cert_data.get('method_used', 'Unknown'),
+                    'verification_hash': cert_data.get('verification', {}).get('completion_hash', ''),
+                    'signature': cert_data.get('_signature', {}).get('signature', ''),
+                    'status': 'Verified',
+                    'wipe_start_time': cert_data.get('start'),
+                    'wipe_end_time': cert_data.get('end'),
+                    'json_url': json_url,
+                    'pdf_url': pdf_url
+                }
+                
+                response = self.supabase.table('certificates').insert(record).execute()
+                
+                if response.data:
+                    logger.info(f"✓ Certificate record created: {response.data[0]['id']}")
+                    return True
+                else:
+                    logger.error("✗ Database insert returned no data")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"✗ Database insert failed: {e}")
                 return False
             
-            print(f"Certificate uploaded successfully. Record ID: {record_id}")
-            return True
-            
         except Exception as e:
-            print(f"Upload error: {e}")
+            logger.error(f"✗ Upload error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-    
+
+
     def process_wipe_completion(self, wipe_result: Dict, auto_upload: bool = True) -> Dict:
-        """
-        Complete certificate processing after wipe
-        
-        Args:
-            wipe_result: Result from wipe operation
-            auto_upload: Whether to automatically upload to Supabase
-            
-        Returns:
-            Dictionary with processing results
-        """
         try:
             # Generate and sign certificate
             json_path, pdf_path, cert_data = self.generate_and_sign_certificate(wipe_result)
@@ -190,61 +260,118 @@ class CertificateManager:
             }
     
     def get_local_certificates(self) -> list:
-        """
-        Get list of locally stored certificates
-        
-        Returns:
-            List of certificate file paths
-        """
         return list(self.local_certs_dir.glob("*.json"))
-    
+  
     def sync_local_certificates(self) -> Dict:
         """
-        Sync local certificates with Supabase
+        Sync all local certificates to Supabase
         
         Returns:
             Dictionary with sync results
         """
-        if not self.supabase.user:
-            return {'success': False, 'message': 'User not logged in'}
+        if not self.user:
+            return {
+                'success': False,
+                'message': 'User not logged in',
+                'synced': 0,
+                'failed': 0,
+                'skipped': 0,
+                'total': 0
+            }
+        
+        if not self.supabase:
+            return {
+                'success': False,
+                'message': 'Supabase client not available',
+                'synced': 0,
+                'failed': 0,
+                'skipped': 0,
+                'total': 0
+            }
+        
+        logger.info("Starting certificate sync...")
         
         local_certs = self.get_local_certificates()
         synced = 0
         failed = 0
+        skipped = 0
+        
+        if not local_certs:
+            logger.info("No local certificates to sync")
+            return {
+                'success': True,
+                'message': 'No certificates to sync',
+                'synced': 0,
+                'failed': 0,
+                'skipped': 0,
+                'total': 0
+            }
+        
+        logger.info(f"Found {len(local_certs)} local certificates")
         
         for json_path in local_certs:
             try:
-                # Load certificate
+                logger.info(f"Processing: {json_path.name}")
+                
+                # Load certificate data
                 with open(json_path, 'r') as f:
                     cert_data = json.load(f)
                 
-                # Check if already uploaded
-                existing = self.supabase.verify_certificate_by_id(cert_data['cert_id'])
-                if existing:
+                cert_id = cert_data.get('cert_id')
+                if not cert_id:
+                    logger.warning(f"No cert_id in {json_path.name}, skipping")
+                    failed += 1
                     continue
+                
+                # Check if already uploaded using self.supabase
+                try:
+                    existing = self.supabase.table('certificates')\
+                        .select('id')\
+                        .eq('cert_id', cert_id)\
+                        .execute()
+                    
+                    if existing.data and len(existing.data) > 0:
+                        logger.info(f"Certificate {cert_id} already exists, skipping")
+                        skipped += 1
+                        continue
+                except Exception as check_error:
+                    logger.warning(f"Could not check existing certificate: {check_error}")
+                    # Continue anyway to attempt upload
                 
                 # Find corresponding PDF
                 pdf_path = json_path.with_suffix('.pdf')
                 if not pdf_path.exists():
+                    logger.warning(f"PDF not found for {json_path.name}")
                     failed += 1
                     continue
                 
-                # Upload
+                # Upload certificate
+                logger.info(f"Uploading certificate {cert_id}...")
                 if self.upload_certificate(json_path, pdf_path, cert_data):
+                    logger.info(f"✓ Synced: {cert_id}")
                     synced += 1
                 else:
+                    logger.error(f"✗ Failed to sync: {cert_id}")
                     failed += 1
                     
             except Exception as e:
-                print(f"Sync error for {json_path}: {e}")
+                logger.error(f"Sync error for {json_path}: {e}")
+                import traceback
+                traceback.print_exc()
                 failed += 1
         
-        return {
+        result = {
             'success': True,
+            'message': f'Synced {synced} certificates',
             'synced': synced,
             'failed': failed,
+            'skipped': skipped,
             'total': len(local_certs)
         }
+        
+        logger.info(f"Sync complete: {result}")
+        return result
+    
     def upload_certificate_to_supabase(self, json_path: Path, pdf_path: Path, 
                                     cert_data: Dict, wipe_data: Dict = None) -> bool:
         if not self.supabase.user:
@@ -283,12 +410,6 @@ class SupabaseCertificateUploader:
     """Handle certificate uploads to Supabase"""
     
     def __init__(self, supabase_client: Client = None):
-        """
-        Initialize Supabase uploader
-        
-        Args:
-            supabase_client: Existing Supabase client or None to create new
-        """
         if supabase_client:
             self.client = supabase_client
         else:
@@ -304,18 +425,6 @@ class SupabaseCertificateUploader:
     
     def upload_certificate_files(self, user_id: str, cert_id: str, 
                                   json_path: Path, pdf_path: Path) -> Tuple[bool, str, Optional[Dict]]:
-        """
-        Upload certificate JSON and PDF files to Supabase Storage
-        
-        Args:
-            user_id: User ID (from auth.users)
-            cert_id: Certificate ID
-            json_path: Path to JSON certificate file
-            pdf_path: Path to PDF certificate file
-            
-        Returns:
-            Tuple of (success: bool, message: str, urls: Dict or None)
-        """
         try:
             # Verify files exist
             if not json_path.exists():
@@ -391,7 +500,7 @@ class SupabaseCertificateUploader:
                 'wipe_method': cert_data.get('method_used'),
                 'verification_hash': cert_data.get('verification', {}).get('completion_hash', ''),
                 'signature': cert_data.get('_signature', {}).get('signature', ''),
-                'status': 'verified',
+                'status': 'Verified',
                 'wipe_start_time': cert_data.get('start'),
                 'wipe_end_time': cert_data.get('end'),
                 'json_url': json_url,

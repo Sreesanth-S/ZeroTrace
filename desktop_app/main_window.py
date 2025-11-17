@@ -1,4 +1,3 @@
-# desktop_app/main_window.py
 from PyQt5.QtWidgets import (QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, 
                              QMessageBox, QProgressBar, QWidget, QComboBox, QGroupBox, 
                              QStyle, QTextEdit)
@@ -9,14 +8,12 @@ from wipe_thread import WipeThread
 from certificate_manager import CertificateManager
 from pathlib import Path
 from logger import logger
-import sys
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict
-from wipe_engine import WipeEngine, WipeMethod, DriveType
-from wipe_thread import WipeThread
-from logger import logger
+import sys
+import os
+
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -32,7 +29,7 @@ except ImportError as e:
 class ZeroTraceMainWindow(QMainWindow):
     """Main window of the ZeroTrace application"""
     
-    def __init__(self, supabase_client=None):
+    def __init__(self, supabase_client=None, user=None):
         super().__init__()
         self.setWindowTitle("ZeroTrace - Secure Drive Wiper")
         self.setMinimumSize(900, 700)
@@ -44,18 +41,21 @@ class ZeroTraceMainWindow(QMainWindow):
         
         # Initialize certificate manager
         self.supabase_client = supabase_client
+        self.user = user  # Store the authenticated user
         self.certificate_manager = None
-
-        # Disable close button (X button in title bar)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)
         
         if CERT_MANAGER_AVAILABLE:
             try:
                 if self.supabase_client:
                     self.certificate_manager = CertificateManager(self.supabase_client)
-                    logger.info("Certificate manager initialized with Supabase")
+                    
+                    # Pass the user to certificate manager
+                    if self.user:
+                        self.certificate_manager.user = self.user
+                        logger.info(f"Certificate manager initialized for user: {self.user.email}")
+                    else:
+                        logger.info("Certificate manager initialized in offline mode")
                 else:
-                    # Create dummy Supabase client for offline mode
                     logger.info("Initializing certificate manager in offline mode")
                     self.certificate_manager = self._init_offline_cert_manager()
             except Exception as e:
@@ -178,6 +178,17 @@ class ZeroTraceMainWindow(QMainWindow):
         title_layout.addSpacing(48)
         header_layout.addLayout(title_layout)
         
+        if self.user:
+            login_status = QLabel(f"Logged in as: {self.user.email}")
+            login_status.setStyleSheet("color: #2ecc71; font-size: 10px;")
+            login_status.setAlignment(Qt.AlignCenter)
+            header_layout.addWidget(login_status)
+        else:
+            login_status = QLabel("⚠️ Offline Mode - Certificates saved locally only")
+            login_status.setStyleSheet("color: #f39c12; font-size: 10px;")
+            login_status.setAlignment(Qt.AlignCenter)
+            header_layout.addWidget(login_status)
+
         subtitle = QLabel("Hardware & Software Secure Erase Solution")
         subtitle.setFont(QFont("Segoe UI", 12))
         subtitle.setAlignment(Qt.AlignCenter)
@@ -311,12 +322,23 @@ class ZeroTraceMainWindow(QMainWindow):
         self.view_certs_button.clicked.connect(self.view_certificates)
         self.view_certs_button.setMinimumHeight(40)
 
+        # Add this after the "View Certificates" button code:
+        self.sync_certs_button = QPushButton("Sync to Cloud")
+        self.sync_certs_button.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.sync_certs_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+        self.sync_certs_button.clicked.connect(self.sync_certificates_to_cloud)
+        self.sync_certs_button.setMinimumHeight(40)
+
+        # Add to button layout (update the existing button_layout section):
         button_layout.addStretch()
-        button_layout.addWidget(self.view_certs_button)
+        if hasattr(self, 'view_certs_button'):
+            button_layout.addWidget(self.view_certs_button)
+        button_layout.addWidget(self.sync_certs_button)  # Add sync button
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.stop_button)
         button_layout.addWidget(self.logout_button)
         button_layout.addStretch()
+
 
         main_layout.addWidget(button_group)
         
@@ -531,10 +553,11 @@ class ZeroTraceMainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
-            
+
             if reply == QMessageBox.Yes:
                 self.log("Stop requested by user...")
                 self.wipe_thread.stop()
+                self.logout_button.setEnabled(True)
     
     def on_progress_update(self, progress, message):
         """Handle progress update from wipe thread"""
@@ -548,12 +571,13 @@ class ZeroTraceMainWindow(QMainWindow):
         self.refresh_button.setEnabled(True)
         self.drive_combo.setEnabled(True)
         self.method_combo.setEnabled(True)
+        self.logout_button.setEnabled(True)
         self.wipe_thread = None
-        
+
         self.log("="*50)
         self.log(f"❌ Wipe FAILED: {error_message}")
         self.log("="*50)
-        
+
         QMessageBox.critical(
             self,
             "❌ Wipe Failed",
@@ -899,6 +923,92 @@ Note: Full certificate features require certificate_utils module.
                     f"Failed to view certificates:\n{str(e)}",
                     QMessageBox.Ok
                 )
+    
+    def sync_certificates_to_cloud(self):
+        """Sync local certificates to Supabase cloud"""
+        if not self.certificate_manager:
+            QMessageBox.warning(
+                self,
+                "Not Available",
+                "Certificate manager is not initialized.",
+                QMessageBox.Ok
+            )
+            return
+        
+        if not self.user:
+            QMessageBox.warning(
+                self,
+                "Not Logged In",
+                "You must be logged in to sync certificates to the cloud.\n\n"
+                "Please restart the application and log in with your credentials.",
+                QMessageBox.Ok
+            )
+            return
+        
+        # Confirm sync
+        reply = QMessageBox.question(
+            self,
+            "Sync Certificates",
+            "Upload all local certificates to Supabase cloud?\n\n"
+            "This will:\n"
+            "• Upload all JSON and PDF files\n"
+            "• Create database records\n"
+            "• Skip certificates already uploaded\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Show progress
+        self.log("Starting certificate sync...")
+        self.status_label.setText("Syncing certificates...")
+        
+        try:
+            # Perform sync
+            result = self.certificate_manager.sync_local_certificates()
+            
+            # Log results
+            self.log(f"Sync complete:")
+            self.log(f"  • Synced: {result['synced']}")
+            self.log(f"  • Skipped: {result['skipped']}")
+            self.log(f"  • Failed: {result['failed']}")
+            self.log(f"  • Total: {result['total']}")
+            
+            # Show results dialog
+            if result['success']:
+                QMessageBox.information(
+                    self,
+                    "Sync Complete",
+                    f"Certificate sync completed!\n\n"
+                    f"Synced: {result['synced']}\n"
+                    f"Skipped (already uploaded): {result['skipped']}\n"
+                    f"Failed: {result['failed']}\n"
+                    f"Total processed: {result['total']}",
+                    QMessageBox.Ok
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Sync Failed",
+                    f"Certificate sync failed:\n\n{result.get('message', 'Unknown error')}",
+                    QMessageBox.Ok
+                )
+            
+            self.status_label.setText("Ready")
+            
+        except Exception as e:
+            logger.error(f"Sync error: {e}", exc_info=True)
+            self.log(f"❌ Sync error: {str(e)}")
+            self.status_label.setText("Sync failed")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"An error occurred during sync:\n\n{str(e)}",
+                QMessageBox.Ok
+            )
 
     def logout(self):
         """Handle user logout"""

@@ -1,16 +1,13 @@
-# Fixed dialogs.py with proper RLS handling
-
 from PyQt5.QtWidgets import (QDialog, QLabel, QVBoxLayout, QLineEdit, QMessageBox, 
                              QDialogButtonBox, QGroupBox, QStyle, QPushButton, QCheckBox)
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QFont
 from supabase import create_client, Client
+from dotenv import load_dotenv
 import os
 import bcrypt
-from dotenv import load_dotenv
 
 load_dotenv()
-
 
 class LoginDialog(QDialog):
     """Login dialog with Supabase authentication"""
@@ -25,9 +22,10 @@ class LoginDialog(QDialog):
         try:
             supabase_url = os.getenv('SUPABASE_URL')
             supabase_key = os.getenv('SUPABASE_KEY')
+            supabase_service_key = os.getenv('SUPABASE_SERVICE_KEY')
             
-            if supabase_url and supabase_key:
-                self.supabase = create_client(supabase_url, supabase_key)
+            if supabase_url and supabase_service_key:
+                self.supabase = create_client(supabase_url, supabase_service_key)
                 self.supabase_available = True
             else:
                 self.supabase = None

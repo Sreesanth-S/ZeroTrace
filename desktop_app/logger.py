@@ -1,7 +1,5 @@
 import logging
-import os
 from pathlib import Path
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 class ZeroTraceLogger:
@@ -16,13 +14,8 @@ class ZeroTraceLogger:
         return cls._instance
 
     def _init_logger(self):
-        # Create logs directory in AppData
-        if os.name == 'nt':  # Windows
-            app_data = os.getenv('APPDATA')
-            log_dir = Path(app_data) / 'ZeroTrace' / 'logs'
-        else:
-            log_dir = Path.home() / '.zerotrace' / 'logs'
-
+        # Create logs directory within desktop_app
+        log_dir = Path(__file__).parent / 'logs'
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # Log file path
@@ -113,7 +106,6 @@ class ZeroTraceLogger:
     def log_error_with_context(self, operation: str, error: Exception):
         """Log error with full context"""
         self.error(f"Error during {operation}: {str(error)}", exc_info=True)
-
 
 # Global logger instance
 logger = ZeroTraceLogger()

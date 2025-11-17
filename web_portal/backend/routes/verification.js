@@ -2,7 +2,6 @@
 import express from 'express';
 import multer from 'multer';
 import { unlink } from 'fs/promises';
-import { join } from 'path';
 import supabaseClient from '../lib/supabaseClient.js';
 
 const router = express.Router();
@@ -63,17 +62,17 @@ router.get('/id/:certId', async (req, res) => {
     }
 
     // Check status
-    if (certRecord.status === 'revoked') {
+    if (certRecord.status === 'Revoked') {
       await supabaseClient.insertVerificationLog(
         certId,
-        'revoked',
+        'Revoked',
         ipAddress,
         userAgent
       );
 
       return res.json({
         status: 'Revoked',
-        message: 'This certificate has been revoked',
+        message: 'This certificate has been Revoked',
         cert_id: certId,
         details: {
           device_name: certRecord.device_name,
@@ -85,7 +84,7 @@ router.get('/id/:certId', async (req, res) => {
     // Log successful verification
     await supabaseClient.insertVerificationLog(
       certId,
-      'verified',
+      'Verified',
       ipAddress,
       userAgent
     );
@@ -118,17 +117,6 @@ router.post('/file', upload.single('file'), async (req, res) => {
     }
 
     uploadPath = req.file.path;
-
-    // Here you would implement the certificate verification logic
-    // For now, we'll return a placeholder response
-    // You would typically:
-    // 1. Parse the file (PDF or JSON)
-    // 2. Extract certificate data
-    // 3. Verify signature
-    // 4. Check against database
-
-    const ipAddress = req.ip || req.connection.remoteAddress;
-    const userAgent = req.headers['user-agent'] || 'Unknown';
 
     // Placeholder verification result
     const isValid = true;
@@ -192,14 +180,14 @@ router.post('/hash', async (req, res) => {
 
     await supabaseClient.insertVerificationLog(
       certRecord.cert_id,
-      'verified',
+      'Verified',
       ipAddress,
       userAgent
     );
 
     res.json({
       status: 'Verified',
-      message: 'Certificate found and verified',
+      message: 'Certificate found and Verified',
       cert_id: certRecord.cert_id,
       details: {
         device_name: certRecord.device_name,

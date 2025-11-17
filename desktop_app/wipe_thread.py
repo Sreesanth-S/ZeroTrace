@@ -1,11 +1,9 @@
-# desktop_app/wipe_thread.py
 from PyQt5.QtCore import QThread, pyqtSignal
 from wipe_engine import WipeEngine
 
 class WipeThread(QThread):
-    """Thread for performing wipe operations"""
     progress_updated = pyqtSignal(int, str)
-    wipe_completed = pyqtSignal(dict)  # Wipe result dict
+    wipe_completed = pyqtSignal(dict) 
     wipe_failed = pyqtSignal(str)
 
     def __init__(self, device_info, method, confirm):
@@ -17,10 +15,8 @@ class WipeThread(QThread):
         self._stop_requested = False
 
     def run(self):
-        """Execute wipe operation in separate thread"""
         try:
             def progress_callback(progress, message):
-                """Callback for progress updates"""
                 self.progress_updated.emit(progress, message)
 
             # Start the wipe operation
@@ -41,6 +37,5 @@ class WipeThread(QThread):
             self.wipe_failed.emit(str(e))
 
     def stop(self):
-        """Stop the wipe operation"""
         self._stop_requested = True
         self.wipe_engine.stop_wipe()

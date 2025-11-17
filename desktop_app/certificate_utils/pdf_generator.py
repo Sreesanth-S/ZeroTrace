@@ -1,8 +1,3 @@
-"""
-PDF Certificate Generator
-Creates professional PDF certificates with QR codes and security features
-"""
-
 import json
 import qrcode
 from io import BytesIO
@@ -14,33 +9,17 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 
 
 class PDFCertificateGenerator:
     """Generate PDF certificates with QR codes and digital signatures"""
     
     def __init__(self, output_dir: str = "certificates"):
-        """
-        Initialize PDF generator
-        
-        Args:
-            output_dir: Directory to save generated PDFs
-        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
     
     def generate_qr_code(self, data: str, size: int = 200) -> Image:
-        """
-        Generate QR code image
-        
-        Args:
-            data: Data to encode in QR code
-            size: Size of QR code in pixels
-            
-        Returns:
-            ReportLab Image object
-        """
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_H,
@@ -245,16 +224,6 @@ class PDFCertificateGenerator:
         return story
     
     def generate_certificate(self, cert_data: Dict, filename: Optional[str] = None) -> Path:
-        """
-        Generate complete PDF certificate
-        
-        Args:
-            cert_data: Dictionary containing certificate data
-            filename: Optional custom filename
-            
-        Returns:
-            Path to generated PDF file
-        """
         if not filename:
             cert_id = cert_data.get('cert_id', 'certificate')
             filename = f"{cert_id}.pdf"

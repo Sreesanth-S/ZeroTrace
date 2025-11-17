@@ -40,7 +40,8 @@ class SupabaseClient {
         .from('certificates')
         .select('*')
         .eq('cert_id', certId)
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       if (error) {
         console.error('Database query error:', error);

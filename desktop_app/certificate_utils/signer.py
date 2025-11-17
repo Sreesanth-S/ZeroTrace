@@ -18,15 +18,8 @@ class CertificateSigner:
     """Handle digital signing of certificates"""
     
     def __init__(self, private_key_path: Optional[str] = None, public_key_path: Optional[str] = None):
-        """
-        Initialize the signer with key paths
-        
-        Args:
-            private_key_path: Path to private key file
-            public_key_path: Path to public key file
-        """
-        self.private_key_path = Path(private_key_path) if private_key_path else Path("keys/private_key.pem")
-        self.public_key_path = Path(public_key_path) if public_key_path else Path("keys/public_key.pem")
+        self.private_key_path = Path(private_key_path) if private_key_path else Path("certificate_utils/keys/private_key.pem")
+        self.public_key_path = Path(public_key_path) if public_key_path else Path("certificate_utils/keys/public_key.pem")
         
         # Ensure keys directory exists
         self.private_key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,15 +53,6 @@ class CertificateSigner:
             return ECC.import_key(f.read())
     
     def generate_certificate_hash(self, cert_data: Dict) -> str:
-        """
-        Generate SHA-256 hash of certificate data
-        
-        Args:
-            cert_data: Dictionary containing certificate information
-            
-        Returns:
-            Hex string of hash
-        """
         # Remove signature if present to avoid circular dependency
         clean_data = {k: v for k, v in cert_data.items() if k != '_signature'}
         
@@ -80,15 +64,6 @@ class CertificateSigner:
         return hash_obj.hexdigest()
     
     def sign_certificate(self, cert_data: Dict) -> Dict:
-        """
-        Sign certificate data and add signature
-        
-        Args:
-            cert_data: Dictionary containing certificate information
-            
-        Returns:
-            Certificate data with signature added
-        """
         # Generate hash
         cert_hash = self.generate_certificate_hash(cert_data)
         
@@ -112,15 +87,6 @@ class CertificateSigner:
         return cert_data
     
     def verify_signature(self, cert_data: Dict) -> bool:
-        """
-        Verify certificate signature
-        
-        Args:
-            cert_data: Dictionary containing certificate with signature
-            
-        Returns:
-            True if signature is valid, False otherwise
-        """
         try:
             # Extract signature info
             signature_info = cert_data.get('_signature')
@@ -159,16 +125,6 @@ class CertificateSigner:
 
 
 def generate_cert_id(device_id: str, timestamp: Optional[str] = None) -> str:
-    """
-    Generate unique certificate ID
-    
-    Args:
-        device_id: Device identifier
-        timestamp: Optional timestamp string
-        
-    Returns:
-        Unique certificate ID
-    """
     if not timestamp:
         timestamp = datetime.utcnow().isoformat()
     

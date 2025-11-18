@@ -1,21 +1,472 @@
 from PyQt5.QtWidgets import (QMainWindow, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, 
                              QMessageBox, QProgressBar, QWidget, QComboBox, QGroupBox, 
-                             QStyle, QTextEdit)
+                             QStyle, QTextEdit, QFrame)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtWidgets import QApplication
 from wipe_engine import WipeEngine, WipeMethod, DriveType
 from wipe_thread import WipeThread
 from certificate_manager import CertificateManager
 from pathlib import Path
 from logger import logger
-from pathlib import Path
 from datetime import datetime
 from typing import Dict
 import sys
 import os
 
+app_font = QFont("Segoe UI", 10)
+QApplication.setFont(app_font)
 
 sys.path.append(str(Path(__file__).parent.parent))
+
+# Define stylesheets
+DARK_STYLESHEET = """
+    /* ================================
+    ZeroTrace – Dark Pro Theme
+    Modern Cybersecurity UI Style
+    ================================ */
+
+    /* ----------- Window Background ----------- */
+    QMainWindow {
+        background-color: #0D1117;
+    }
+
+    /* ----------- GroupBox (Cards) ----------- */
+    QGroupBox {
+        background-color: #161B22;
+        border: 1px solid #21262D;
+        border-radius: 12px;
+        margin-top: 20px;
+        padding: 18px;
+        font-family: "Segoe UI";
+    }
+
+    QGroupBox::title {
+        color: #C9D1D9;
+        subcontrol-origin: margin;
+        left: 12px;
+        padding: 4px 8px;
+        font-size: 14px;
+        background: transparent;
+    }
+
+    /* ----------- Labels ----------- */
+    QLabel {
+        color: #C9D1D9;
+        font-family: "Segoe UI";
+        font-size: 11pt;
+    }
+
+    /* Subtle warnings */
+    QLabel#warningLabel {
+        color: #F85149;
+        font-weight: bold;
+    }
+
+    /* ----------- ComboBox ----------- */
+    QComboBox {
+        background-color: #0D1117;
+        border: 1px solid #30363D;
+        padding: 8px;
+        border-radius: 6px;
+        color: #C9D1D9;
+        font-size: 10pt;
+    }
+
+    QComboBox:hover {
+        border-color: #58A6FF;
+    }
+
+    /* Dropdown menu */
+    QComboBox QAbstractItemView {
+        background-color: #161B22;
+        color: #C9D1D9;
+        selection-background-color: #238636;
+        border: 1px solid #30363D;
+    }
+
+    /* ----------- Buttons (General) ----------- */
+    QPushButton {
+        background-color: #21262D;
+        color: #C9D1D9;
+        border: 1px solid #30363D;
+        padding: 10px 16px;
+        border-radius: 8px;
+        min-width: 110px;
+        font-family: "Segoe UI";
+        font-size: 11pt;
+    }
+
+    QPushButton:hover {
+        border-color: #58A6FF;
+        background-color: #30363D;
+    }
+
+    QPushButton:disabled {
+        background-color: #151A1E;
+        color: #6E7681;
+        border: 1px solid #1C2128;
+    }
+
+    /* ----------- Primary Buttons ----------- */
+    #startButton {
+        background-color: #238636;
+        border: 1px solid #2EA043;
+        color: white;
+    }
+
+    #startButton:hover {
+        background-color: #2EA043;
+    }
+
+    #stopButton {
+        background-color: #DA3633;
+        border: 1px solid #F85149;
+        color: white;
+    }
+
+    #stopButton:hover {
+        background-color: #F85149;
+    }
+
+    /* Logout / Cloud buttons */
+    #logoutButton {
+        background-color: #7435c9;
+        border: 1px solid #8e53eb;
+        color: white;
+    }
+
+    #logoutButton:hover {
+        background-color: #8e53eb;
+    }
+
+    /* ----------- Progress Bar ----------- */
+    QProgressBar {
+        background-color: #0D1117;
+        border: 1px solid #30363D;
+        border-radius: 6px;
+        height: 26px;
+        color: #C9D1D9;
+        text-align: center;
+        font-weight: bold;
+    }
+
+    QProgressBar::chunk {
+        background-color: #00FF99;
+        border-radius: 6px;
+    }
+
+    /* ----------- TextEdit (Operation Log Console) ----------- */
+    QTextEdit {
+        background-color: #0D1117;
+        color: #00EA6A;
+        border: 1px solid #30363D;
+        border-radius: 8px;
+        padding: 8px;
+        font-family: Consolas, monospace;
+        font-size: 10pt;
+    }
+
+    /* ----------- Scrollbars (Modern Minimal) ----------- */
+    QScrollBar:vertical {
+        background: #0D1117;
+        width: 12px;
+        margin: 0px;
+    }
+
+    QScrollBar::handle:vertical {
+        background: #30363D;
+        border-radius: 6px;
+    }
+
+    QScrollBar::handle:vertical:hover {
+        background: #58A6FF;
+    }
+
+    QScrollBar::add-line,
+    QScrollBar::sub-line {
+        height: 0px;
+    }
+
+    /* Horizontal scrollbars */
+    QScrollBar:horizontal {
+        background: #0D1117;
+        height: 12px;
+    }
+
+    QScrollBar::handle:horizontal {
+        background: #30363D;
+        border-radius: 6px;
+    }
+
+    QScrollBar::handle:horizontal:hover {
+        background: #58A6FF;
+    }
+
+    /* ----------- Tooltips ----------- */
+    QToolTip {
+        background-color: #161B22;
+        color: #C9D1D9;
+        border: 1px solid #30363D;
+        padding: 6px;
+        font-size: 10pt;
+    }
+
+    #HeaderContainer {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #0E1621, stop:1 #0A0F14);
+        padding: 25px;
+        border-bottom: 1px solid #1F2937;
+    }
+
+    #TitleLabel {
+        color: #E6EDF3;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+
+    #SubtitleLabel {
+        color: #9BAEC8;
+        font-size: 14px;
+    }
+
+    #LoggedInLabel {
+        color: #00FF99;
+        font-size: 13px;
+        font-weight: bold;
+    }
+
+    #FooterBar {
+        background-color: #161B22;
+        border-top: 1px solid #21262D;
+        padding: 15px 20px;
+    }
+"""
+
+LIGHT_STYLESHEET = """
+    /* ================================
+    ZeroTrace – Light Theme
+    Clean and Professional UI Style
+    ================================ */
+
+    /* ----------- Window Background ----------- */
+    QMainWindow {
+        background-color: #F8F9FA;
+    }
+
+    /* ----------- GroupBox (Cards) ----------- */
+    QGroupBox {
+        background-color: #FFFFFF;
+        border: 1px solid #E1E5E9;
+        border-radius: 12px;
+        margin-top: 20px;
+        padding: 18px;
+        font-family: "Segoe UI";
+    }
+
+    QGroupBox::title {
+        color: #24292F;
+        subcontrol-origin: margin;
+        left: 12px;
+        padding: 4px 8px;
+        font-size: 14px;
+        background: transparent;
+    }
+
+    /* ----------- Labels ----------- */
+    QLabel {
+        color: #24292F;
+        font-family: "Segoe UI";
+        font-size: 11pt;
+    }
+
+    /* Subtle warnings */
+    QLabel#warningLabel {
+        color: #CF222E;
+        font-weight: bold;
+    }
+
+    /* ----------- ComboBox ----------- */
+    QComboBox {
+        background-color: #FFFFFF;
+        border: 1px solid #D1D9E0;
+        padding: 8px;
+        border-radius: 6px;
+        color: #24292F;
+        font-size: 10pt;
+    }
+
+    QComboBox:hover {
+        border-color: #0969DA;
+    }
+
+    /* Dropdown menu */
+    QComboBox QAbstractItemView {
+        background-color: #FFFFFF;
+        color: #24292F;
+        selection-background-color: #238636;
+        border: 1px solid #D1D9E0;
+    }
+
+    /* ----------- Buttons (General) ----------- */
+    QPushButton {
+        background-color: #F6F8FA;
+        color: #24292F;
+        border: 1px solid #D1D9E0;
+        padding: 10px 16px;
+        border-radius: 8px;
+        min-width: 110px;
+        font-family: "Segoe UI";
+        font-size: 11pt;
+    }
+
+    QPushButton:hover {
+        border-color: #0969DA;
+        background-color: #F3F4F6;
+    }
+
+    QPushButton:disabled {
+        background-color: #FAFBFC;
+        color: #8C959F;
+        border: 1px solid #D1D9E0;
+    }
+
+    /* ----------- Primary Buttons ----------- */
+    #startButton {
+        background-color: #238636;
+        border: 1px solid #2EA043;
+        color: white;
+    }
+
+    #startButton:hover {
+        background-color: #2EA043;
+    }
+
+    #stopButton {
+        background-color: #DA3633;
+        border: 1px solid #F85149;
+        color: white;
+    }
+
+    #stopButton:hover {
+        background-color: #F85149;
+    }
+
+    /* Logout / Cloud buttons */
+    #logoutButton {
+        background-color: #8250DF;
+        border: 1px solid #8957E5;
+        color: white;
+    }
+
+    #logoutButton:hover {
+        background-color: #8957E5;
+    }
+
+    /* ----------- Progress Bar ----------- */
+    QProgressBar {
+        background-color: #FFFFFF;
+        border: 1px solid #D1D9E0;
+        border-radius: 6px;
+        height: 26px;
+        color: #24292F;
+        text-align: center;
+        font-weight: bold;
+    }
+
+    QProgressBar::chunk {
+        background-color: #238636;
+        border-radius: 6px;
+    }
+
+    /* ----------- TextEdit (Operation Log Console) ----------- */
+    QTextEdit {
+        background-color: #FFFFFF;
+        color: #24292F;
+        border: 1px solid #D1D9E0;
+        border-radius: 8px;
+        padding: 8px;
+        font-family: Consolas, monospace;
+        font-size: 10pt;
+    }
+
+    /* ----------- Scrollbars (Modern Minimal) ----------- */
+    QScrollBar:vertical {
+        background: #F8F9FA;
+        width: 12px;
+        margin: 0px;
+    }
+
+    QScrollBar::handle:vertical {
+        background: #D1D9E0;
+        border-radius: 6px;
+    }
+
+    QScrollBar::handle:vertical:hover {
+        background: #0969DA;
+    }
+
+    QScrollBar::add-line,
+    QScrollBar::sub-line {
+        height: 0px;
+    }
+
+    /* Horizontal scrollbars */
+    QScrollBar:horizontal {
+        background: #F8F9FA;
+        height: 12px;
+    }
+
+    QScrollBar::handle:horizontal {
+        background: #D1D9E0;
+        border-radius: 6px;
+    }
+
+    QScrollBar::handle:horizontal:hover {
+        background: #0969DA;
+    }
+
+    /* ----------- Tooltips ----------- */
+    QToolTip {
+        background-color: #FFFFFF;
+        color: #24292F;
+        border: 1px solid #D1D9E0;
+        padding: 6px;
+        font-size: 10pt;
+    }
+
+    #HeaderContainer {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #FFFFFF, stop:1 #F8F9FA);
+        padding: 25px;
+        border-bottom: 1px solid #E1E5E9;
+    }
+
+    #TitleLabel {
+        color: #24292F;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+
+    #SubtitleLabel {
+        color: #656D76;
+        font-size: 14px;
+    }
+
+    #LoggedInLabel {
+        color: #238636;
+        font-size: 13px;
+        font-weight: bold;
+    }
+
+    #FooterBar {
+        background-color: #FFFFFF;
+        border-top: 1px solid #E1E5E9;
+        padding: 15px 20px;
+    }
+"""
 
 try:
     from certificate_manager import CertificateManager
@@ -25,7 +476,7 @@ except ImportError as e:
     CERT_MANAGER_AVAILABLE = False
     CertificateManager = None
     SupabaseDesktopClient = None
-    
+
 class ZeroTraceMainWindow(QMainWindow):
     """Main window of the ZeroTrace application"""
     
@@ -33,7 +484,10 @@ class ZeroTraceMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ZeroTrace - Secure Drive Wiper")
         self.setMinimumSize(900, 700)
-        
+
+        # Initialize theme
+        self.light_mode = False
+
         # Initialize wipe engine
         self.wipe_engine = WipeEngine()
         self.wipe_thread = None
@@ -81,79 +535,15 @@ class ZeroTraceMainWindow(QMainWindow):
         
     def init_ui(self):
         """Initialize the user interface"""
-        # Set window style
-        self.setStyleSheet("""
-            QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2c3e50, stop:1 #3498db);
-            }
-            QGroupBox {
-                background-color: rgba(255, 255, 255, 220);
-                border-radius: 10px;
-                margin-top: 1em;
-                padding: 15px;
-                font-weight: bold;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                color: #2c3e50;
-            }
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 5px;
-                min-width: 100px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-            QPushButton#startButton {
-                background-color: #27ae60;
-            }
-            QPushButton#startButton:hover {
-                background-color: #229954;
-            }
-            QPushButton#stopButton {
-                background-color: #e74c3c;
-            }
-            QPushButton#stopButton:hover {
-                background-color: #c0392b;
-            }
-            QComboBox {
-                padding: 5px;
-                border: 2px solid #3498db;
-                border-radius: 5px;
-                min-width: 200px;
-                background-color: white;
-            }
-            QLabel {
-                color: #2c3e50;
-            }
-            QProgressBar {
-                border: 2px solid #3498db;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #2ecc71;
-                border-radius: 3px;
-            }
-            QTextEdit {
-                background-color: #2c3e50;
-                color: #ecf0f1;
-                border: 2px solid #34495e;
-                border-radius: 5px;
-                font-family: 'Courier New';
-                font-size: 9pt;
-            }
-        """)
+        # Set initial dark theme
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        titlebar = QFrame()
+        titlebar.setObjectName("TitleBar")
+
+        close_btn = QPushButton("✕")
+        max_btn = QPushButton("🗖")
+        min_btn = QPushButton("—")
 
         # Create central widget and main layout
         central_widget = QWidget()
@@ -167,25 +557,29 @@ class ZeroTraceMainWindow(QMainWindow):
         header_layout = QVBoxLayout(header)
         
         title_layout = QHBoxLayout()
+
         icon_label = QLabel()
         icon_label.setPixmap(self.style().standardIcon(QStyle.SP_DriveHDIcon).pixmap(48, 48))
         title_layout.addWidget(icon_label)
-        
+
+        title_layout.addStretch()
+
         title_label = QLabel("ZeroTrace Secure Drive Wiper")
         title_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         title_layout.addWidget(title_label)
-        title_layout.addSpacing(48)
+
+        title_layout.addStretch()
         header_layout.addLayout(title_layout)
         
         if self.user:
             login_status = QLabel(f"Logged in as: {self.user.email}")
-            login_status.setStyleSheet("color: #2ecc71; font-size: 10px;")
+            login_status.setStyleSheet("color: #2ecc71; font-size: 18px;")
             login_status.setAlignment(Qt.AlignCenter)
             header_layout.addWidget(login_status)
         else:
             login_status = QLabel("⚠️ Offline Mode - Certificates saved locally only")
-            login_status.setStyleSheet("color: #f39c12; font-size: 10px;")
+            login_status.setStyleSheet("color: #f39c12; font-size: 18px;")
             login_status.setAlignment(Qt.AlignCenter)
             header_layout.addWidget(login_status)
 
@@ -289,10 +683,11 @@ class ZeroTraceMainWindow(QMainWindow):
         
         main_layout.addWidget(log_group)
 
-        # Create action buttons group
-        button_group = QGroupBox("Actions")
-        button_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        button_layout = QHBoxLayout(button_group)
+        # Create footer bar
+        footer = QWidget()
+        footer.setObjectName("FooterBar")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(20, 10, 20, 10)
 
         self.start_button = QPushButton("Start Wiping")
         self.start_button.setObjectName("startButton")
@@ -308,7 +703,7 @@ class ZeroTraceMainWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop_wipe)
         self.stop_button.setEnabled(False)
         self.stop_button.setMinimumHeight(40)
-        
+
         self.logout_button = QPushButton("Logout")
         self.logout_button.setObjectName("logoutButton")
         self.logout_button.setFont(QFont("Segoe UI", 10, QFont.Bold))
@@ -329,18 +724,28 @@ class ZeroTraceMainWindow(QMainWindow):
         self.sync_certs_button.clicked.connect(self.sync_certificates_to_cloud)
         self.sync_certs_button.setMinimumHeight(40)
 
-        # Add to button layout (update the existing button_layout section):
-        button_layout.addStretch()
+        header.setObjectName("HeaderContainer")
+        title_label.setObjectName("TitleLabel")
+        subtitle.setObjectName("SubtitleLabel")
+        login_status.setObjectName("LoggedInLabel")
+
+        self.themeToggle = QPushButton("Light Mode")
+        self.themeToggle.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.themeToggle.clicked.connect(self.toggle_theme)
+        self.themeToggle.setMinimumHeight(40)
+
+        # Add buttons to footer layout
+        footer_layout.addStretch()
         if hasattr(self, 'view_certs_button'):
-            button_layout.addWidget(self.view_certs_button)
-        button_layout.addWidget(self.sync_certs_button)  # Add sync button
-        button_layout.addWidget(self.start_button)
-        button_layout.addWidget(self.stop_button)
-        button_layout.addWidget(self.logout_button)
-        button_layout.addStretch()
+            footer_layout.addWidget(self.view_certs_button)
+        footer_layout.addWidget(self.sync_certs_button)  # Add sync button
+        footer_layout.addWidget(self.themeToggle)
+        footer_layout.addWidget(self.start_button)
+        footer_layout.addWidget(self.stop_button)
+        footer_layout.addWidget(self.logout_button)
+        footer_layout.addStretch()
 
-
-        main_layout.addWidget(button_group)
+        main_layout.addWidget(footer)
         
         # Initialize drives list
         self.refresh_drives()
@@ -351,6 +756,23 @@ class ZeroTraceMainWindow(QMainWindow):
         self.log_display.append(f"[{self._get_timestamp()}] {message}")
         self.log_display.moveCursor(QTextCursor.End)
     
+    def toggle_theme(self):
+        if self.light_mode:
+            self.setStyleSheet(DARK_STYLESHEET)
+            self.themeToggle.setText("☀ Light Mode")
+            self.light_mode = False
+        else:
+            self.setStyleSheet(LIGHT_STYLESHEET)
+            self.themeToggle.setText("🌙 Dark Mode")
+            self.light_mode = True
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dragPos = event.globalPos()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton:
+            self.move(self.pos() + (event.globalPos() - self.dragPos))
+            self.dragPos = event.globalPos()
     def _get_timestamp(self) -> str:
         """Get current timestamp"""
         from datetime import datetime

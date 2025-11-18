@@ -1,8 +1,8 @@
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, Tuple, List
-from certificate_utils.signer import CertificateSigner, generate_cert_id
-from certificate_utils.pdf_generator import PDFCertificateGenerator
+from signer import CertificateSigner, generate_cert_id
+from pdf_generator import PDFCertificateGenerator
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from logger import logger

@@ -316,7 +316,7 @@ class WipeEngine:
         
         return False
 
-    def _detect_drive_capabilities(self, device_info: DeviceInfo):
+    def _detect_drive_capabilities(self, device_info: DeviceInfo, physical_disk):
         """Detect drive type and supported secure erase methods"""
         try:
             interface = device_info.bus_type.lower()

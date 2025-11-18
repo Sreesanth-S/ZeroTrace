@@ -17,6 +17,7 @@ public_key.pem
 private_key.pem
 *.key  
 *.pem
+supabase_config/
 
 # Dependencies
 package-lock.json

@@ -121,10 +121,7 @@ router.post('/file', upload.single('file'), async (req, res) => {
     // Placeholder verification result
     const isValid = true;
     const message = 'Certificate verification not fully implemented';
-    
-    // For demonstration, assuming we extract cert_id from file
-    const certId = 'demo-cert-id'; // This would come from parsing the file
-    
+      
     res.json({
       status: isValid ? 'Verified' : 'Invalid',
       message,

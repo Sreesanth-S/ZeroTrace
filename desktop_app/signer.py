@@ -18,8 +18,8 @@ class CertificateSigner:
     """Handle digital signing of certificates"""
     
     def __init__(self, private_key_path: Optional[str] = None, public_key_path: Optional[str] = None):
-        self.private_key_path = Path(private_key_path) if private_key_path else Path("certificate_utils/keys/private_key.pem")
-        self.public_key_path = Path(public_key_path) if public_key_path else Path("certificate_utils/keys/public_key.pem")
+        self.private_key_path = Path(private_key_path) if private_key_path else Path("keys/private_key.pem")
+        self.public_key_path = Path(public_key_path) if public_key_path else Path("keys/public_key.pem")
         
         # Ensure keys directory exists
         self.private_key_path.parent.mkdir(parents=True, exist_ok=True)

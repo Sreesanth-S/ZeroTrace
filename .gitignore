@@ -231,6 +231,9 @@ private_key.pem
 
 # Supabase config (contains sensitive info)
 supabase_config/
+supabase_config/*
+!supabase_config/*.example.sql
+!supabase_config/README.md
 
 # Uploads
 uploads/

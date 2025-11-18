@@ -216,6 +216,8 @@ Desktop.ini
 
 # VS Code
 .vscode/
+.vs/
+**/.vs/
 
 # Logs
 logs/

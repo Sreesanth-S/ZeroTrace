@@ -14,3 +14,5 @@ export const getCurrentUser = async () => {
   if (error) throw error;
   return user;
 };
+
+export { supabaseKey };

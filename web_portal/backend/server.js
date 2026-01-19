@@ -45,7 +45,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors({
   origin: config.corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'apikey'],
   credentials: true
 }));
 
@@ -58,6 +58,19 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     version: config.appVersion
   });
+});
+
+// Middleware to require API key for verification routes
+app.use('/api/verify', (req, res, next) => {
+  const apiKey = req.headers.apikey || req.query.apikey;
+  // Allow requests with the public anon key or service key
+  if (!apiKey || (apiKey !== config.supabaseKey && apiKey !== config.supabaseServiceKey)) {
+    return res.status(401).json({
+      message: 'No API key found in request',
+      hint: 'No `apikey` request header or url param was found.'
+    });
+  }
+  next();
 });
 
 // Register routes

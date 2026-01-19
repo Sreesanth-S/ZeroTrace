@@ -15,7 +15,7 @@ class SupabaseDesktopClient:
         """Initialize Supabase client"""
         self.url = os.getenv('SUPABASE_URL')
         self.key = os.getenv('SUPABASE_KEY')
-        self.service_role_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        self.service_role_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         if not self.url or not self.key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment")

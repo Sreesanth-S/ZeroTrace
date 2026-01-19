@@ -36,7 +36,9 @@ class SupabaseClient {
 
   async getCertificateById(certId) {
     try {
-      const { data, error } = await this.client
+      // Use service client to bypass RLS restrictions on public queries
+      const client = this.serviceClient || this.client;
+      const { data, error } = await client
         .from('certificates')
         .select('*')
         .eq('cert_id', certId)
@@ -78,7 +80,9 @@ class SupabaseClient {
 
   async insertVerificationLog(certId, result, ipAddress, userAgent) {
     try {
-      const { error } = await this.client
+      // Use service client for verification logs to bypass RLS
+      const client = this.serviceClient || this.client;
+      const { error } = await client
         .from('verification_logs')
         .insert({
           cert_id: certId,

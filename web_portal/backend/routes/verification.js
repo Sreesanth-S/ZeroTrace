@@ -37,13 +37,21 @@ const upload = multer({
 router.get('/id/:certId', async (req, res) => {
   try {
     const { certId } = req.params;
-    
+
+    console.log('Verifying certificate ID:', certId);
+
     // Get client info for logging
     const ipAddress = req.ip || req.connection.remoteAddress;
     const userAgent = req.headers['user-agent'] || 'Unknown';
 
     // Fetch certificate from database
     const certRecord = await supabaseClient.getCertificateById(certId);
+
+    console.log('Certificate record found:', certRecord ? 'Yes' : 'No');
+    if (certRecord) {
+      console.log('Certificate status:', certRecord.status);
+      console.log('Certificate cert_id:', certRecord.cert_id);
+    }
 
     if (!certRecord) {
       // Log verification attempt

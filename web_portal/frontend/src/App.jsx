@@ -1,6 +1,6 @@
 // web_portal/frontend/src/App.jsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, getCurrentUser } from './lib/supabase';
+import { supabase, getCurrentUser, supabaseKey } from './lib/supabase';
 
 // Helper Tailwind classes
 const INPUT_CLASS = "block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150";
@@ -109,6 +109,7 @@ const PublicVerificationPortal = ({ setView }) => {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
+                    'apikey': supabaseKey,
                 }
             });
 
@@ -140,6 +141,9 @@ const PublicVerificationPortal = ({ setView }) => {
             const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
             const response = await fetch(`${apiUrl}/api/verify/file`, {
                 method: 'POST',
+                headers: {
+                    'apikey': supabaseKey,
+                },
                 body: formData
             });
 

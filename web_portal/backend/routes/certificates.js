@@ -5,6 +5,58 @@ import supabaseClient from '../lib/supabaseClient.js';
 
 const router = express.Router();
 
+// Create/register a new certificate
+router.post('/', requireAuth, async (req, res) => {
+  try {
+    const {
+      cert_id,
+      device_name,
+      device_model,
+      wipe_method,
+      wipe_start_time,
+      wipe_end_time,
+      status,
+      verification_hash,
+      certificate_data
+    } = req.body;
+
+    if (!cert_id) {
+      return res.status(400).json({ error: 'cert_id is required' });
+    }
+
+    // Insert certificate into database
+    const { data, error } = await supabaseClient.client
+      .from('certificates')
+      .insert({
+        cert_id,
+        user_id: req.user.id,
+        device_name: device_name || 'Unknown Device',
+        device_model: device_model || 'Unknown Model',
+        wipe_method: wipe_method || 'Unknown',
+        wipe_start_time: wipe_start_time || new Date().toISOString(),
+        wipe_end_time: wipe_end_time || new Date().toISOString(),
+        status: status || 'Verified',
+        verification_hash: verification_hash || null,
+        certificate_data: certificate_data || null
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Certificate creation error:', error);
+      return res.status(500).json({ error: 'Failed to create certificate', details: error });
+    }
+
+    res.status(201).json({
+      message: 'Certificate created successfully',
+      certificate: data
+    });
+  } catch (error) {
+    console.error('Certificate creation error:', error);
+    res.status(500).json({ error: 'Failed to create certificate' });
+  }
+});
+
 // List user's certificates
 router.get('/', requireAuth, async (req, res) => {
   try {

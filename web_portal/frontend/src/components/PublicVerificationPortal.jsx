@@ -1,18 +1,43 @@
 import React, { useState } from 'react';
 import QrScanner from './QrScanner';
+import { supabaseKey } from '../lib/supabase';
 // Removed: import QrGenerator from './QrGenerator';
 
 const PublicVerificationPortal = ({ setView }) => {
   const [certificateId, setCertificateId] = useState('');
   // State to manage the active verification mode: 'manual', 'pdf', or 'scan'
   const [verificationMode, setVerificationMode] = useState('manual');
+  const [verificationResult, setVerificationResult] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleManualVerification = (e) => {
-    e.preventDefault(); 
-    // Simple redirect/verification simulation
-    if (certificateId.trim() !== '') {
-      // In a real app, this would trigger a backend API call to verify the ID
-      window.location.href = `https://your-domain.com/verify?id=${certificateId}`;
+  const handleManualVerification = async (e) => {
+    e.preventDefault();
+    if (certificateId.trim() === '') return;
+
+    setIsLoading(true);
+    setVerificationResult(null);
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/verify/id/${certificateId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setVerificationResult(data);
+      } else {
+        setVerificationResult({ error: data.message || 'Verification failed' });
+      }
+    } catch (error) {
+      console.error('Verification error:', error);
+      setVerificationResult({ error: 'Network error. Please try again.' });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -50,8 +75,29 @@ const PublicVerificationPortal = ({ setView }) => {
                   placeholder="Enter Certificate ID"
                   required
                 />
-                <button type="submit">Verify Certificate</button>
+                <button type="submit" disabled={isLoading}>
+                  {isLoading ? 'Verifying...' : 'Verify Certificate'}
+                </button>
               </form>
+              {verificationResult && (
+                <div className="verification-result" style={{ marginTop: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
+                  {verificationResult.error ? (
+                    <p style={{ color: 'red' }}>{verificationResult.error}</p>
+                  ) : (
+                    <div>
+                      <p><strong>Status:</strong> {verificationResult.status}</p>
+                      <p><strong>Message:</strong> {verificationResult.message}</p>
+                      {verificationResult.details && (
+                        <div>
+                          <p><strong>Certificate ID:</strong> {verificationResult.cert_id}</p>
+                          <p><strong>Device Name:</strong> {verificationResult.details.device_name}</p>
+                          <p><strong>Wipe Date:</strong> {verificationResult.details.wipe_date}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
         );

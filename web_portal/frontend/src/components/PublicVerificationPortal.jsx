@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import QrScanner from './QrScanner';
 import { supabaseKey } from '../lib/supabase';
-// Removed: import QrGenerator from './QrGenerator';
 
 const PublicVerificationPortal = ({ setView }) => {
   const [certificateId, setCertificateId] = useState('');
@@ -41,16 +40,36 @@ const PublicVerificationPortal = ({ setView }) => {
     }
   };
 
-  const handlePdfUpload = (e) => {
-    e.preventDefault();
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      console.log('PDF file uploaded:', file.name);
-      // In a real app, you would process the PDF (e.g., extract embedded data or hash) 
-      // and send it to the backend for verification.
-      // NOTE: Using console.log instead of alert for better practice.
-      console.log(`Simulating verification for PDF: ${file.name}`);
-      // Clear file input if necessary or handle state change
+    if (!file) return;
+
+    setIsLoading(true);
+    setVerificationResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('http://localhost:5000/api/verify/file', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setVerificationResult(data);
+      } else {
+        setVerificationResult({ error: data.error || 'File verification failed' });
+      }
+    } catch (error) {
+      console.error('File upload error:', error);
+      setVerificationResult({ error: 'Network error. Please try again.' });
+    } finally {
+      setIsLoading(false);
+      // Clear file input
+      e.target.value = '';
     }
   };
 
@@ -105,17 +124,39 @@ const PublicVerificationPortal = ({ setView }) => {
       case 'pdf':
         return (
           <section>
-            <h2>Verify by Uploading PDF</h2>
+            <h2>Verify by Uploading Certificate</h2>
             <div className="verification-box">
-              <p>Upload the certificate PDF to verify its digital signature.</p>
+              <p>Upload your certificate file (JSON) to verify its authenticity.</p>
               <form>
                 <input
                   type="file"
-                  accept=".pdf"
-                  onChange={handlePdfUpload}
+                  accept=".json"
+                  onChange={handleFileUpload}
                   required
                 />
               </form>
+              {verificationResult && (
+                <div className="verification-result" style={{ marginTop: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
+                  {verificationResult.error ? (
+                    <p style={{ color: 'red' }}>{verificationResult.error}</p>
+                  ) : (
+                    <div>
+                      <p><strong>Status:</strong> {verificationResult.status}</p>
+                      <p><strong>Message:</strong> {verificationResult.message}</p>
+                      {verificationResult.details && (
+                        <div>
+                          <p><strong>Certificate ID:</strong> {verificationResult.cert_id}</p>
+                          <p><strong>Device Name:</strong> {verificationResult.details.device_name}</p>
+                          <p><strong>Wipe Method:</strong> {verificationResult.details.wipe_method}</p>
+                          <p><strong>Wipe Date:</strong> {verificationResult.details.wipe_date}</p>
+                          <p><strong>Signature Valid:</strong> {verificationResult.details.signature_valid ? 'Yes' : 'No'}</p>
+                          <p><strong>Database Match:</strong> {verificationResult.details.database_match ? 'Yes' : 'No'}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
         );
@@ -153,14 +194,14 @@ const PublicVerificationPortal = ({ setView }) => {
         >
           Manual ID
         </button>
-        <button 
-          style={{ 
+        <button
+          style={{
             backgroundColor: verificationMode === 'pdf' ? '#1e7e34' : '#28a745',
             color: 'white',
           }}
           onClick={() => setVerificationMode('pdf')}
         >
-          PDF Upload
+          JSON Upload
         </button>
         <button 
           style={{ 

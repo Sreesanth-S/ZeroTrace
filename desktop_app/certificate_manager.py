@@ -45,8 +45,9 @@ class CertificateManager:
             except:
                 pass
         
-        # Local storage paths
-        self.local_certs_dir = Path("certificates")
+        # Local storage paths - use absolute path based on script location
+        script_dir = Path(__file__).parent
+        self.local_certs_dir = script_dir / "certificates"
         self.local_certs_dir.mkdir(exist_ok=True)
     
     def create_certificate_data(self, wipe_result: Dict) -> Dict:
@@ -204,7 +205,7 @@ class CertificateManager:
                     'device_model': cert_data.get('device_info', {}).get('model', 'N/A'),
                     'device_serial': cert_data.get('device_info', {}).get('serial', 'N/A'),
                     'wipe_method': cert_data.get('method_used', 'Unknown'),
-                    'verification_hash': cert_data.get('verification', {}).get('completion_hash', ''),
+                    'verification_hash': cert_data.get('_signature', {}).get('verification_hash', ''),
                     'signature': cert_data.get('_signature', {}).get('signature', ''),
                     'status': 'Verified',
                     'wipe_start_time': cert_data.get('start'),

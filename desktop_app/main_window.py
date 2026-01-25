@@ -1307,8 +1307,10 @@ Note: Full certificate features require certificate_utils module.
     def view_certificates(self):
             """View local certificates"""
             try:
-                cert_dir = Path("certificates")
-                
+                # Use the same path logic as certificate_manager.py
+                script_dir = Path(__file__).parent
+                cert_dir = script_dir / "certificates"
+
                 if not cert_dir.exists():
                     QMessageBox.information(
                         self,
@@ -1318,12 +1320,12 @@ Note: Full certificate features require certificate_utils module.
                         QMessageBox.Ok
                     )
                     return
-                
+
                 # Get all certificate files
                 json_certs = list(cert_dir.glob("*.json"))
                 txt_certs = list(cert_dir.glob("*.txt"))
                 all_certs = json_certs + txt_certs
-                
+
                 if not all_certs:
                     QMessageBox.information(
                         self,
@@ -1333,10 +1335,10 @@ Note: Full certificate features require certificate_utils module.
                         QMessageBox.Ok
                     )
                     return
-                
+
                 # Open certificate folder
                 self._open_certificate_folder(cert_dir)
-                
+
             except Exception as e:
                 logger.error(f"Error viewing certificates: {e}")
                 QMessageBox.critical(

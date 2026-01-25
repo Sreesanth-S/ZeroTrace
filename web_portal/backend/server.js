@@ -60,19 +60,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Middleware to require API key for verification routes
-app.use('/api/verify', (req, res, next) => {
-  const apiKey = req.headers.apikey || req.query.apikey;
-  // Allow requests with the public anon key or service key
-  if (!apiKey || (apiKey !== config.supabaseKey && apiKey !== config.supabaseServiceKey)) {
-    return res.status(401).json({
-      message: 'No API key found in request',
-      hint: 'No `apikey` request header or url param was found.'
-    });
-  }
-  next();
-});
-
 // Register routes
 app.use('/api/auth', authRoutes);
 app.use('/api/certificates', certificatesRoutes);

@@ -57,6 +57,29 @@ class SupabaseClient {
     }
   }
 
+  async getCertificateByHash(verificationHash) {
+    try {
+      // Use service client to bypass RLS restrictions on public queries
+      const client = this.serviceClient || this.client;
+      const { data, error } = await client
+        .from('certificates')
+        .select('*')
+        .eq('verification_hash', verificationHash)
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Database query error:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Database query error:', error);
+      return null;
+    }
+  }
+
   async getUserCertificates(userId, limit = 50, offset = 0) {
     try {
       const { data, error } = await this.client

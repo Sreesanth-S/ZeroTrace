@@ -476,7 +476,7 @@ class PinDialog(QDialog):
         self.pin = None
         
         self.setWindowTitle("Set Security PIN" if setup_mode else "Enter Security PIN")
-        self.setFixedSize(400, 320)
+        self.setFixedSize(460, setup_mode and 480 or 420)
         
         self.setStyleSheet("""
             QDialog {
@@ -484,32 +484,53 @@ class PinDialog(QDialog):
                     stop:0 #2c3e50, stop:1 #3498db);
             }
             QGroupBox {
-                background-color: rgba(255, 255, 255, 220);
+                background-color: rgba(255, 255, 255, 240);
                 border-radius: 10px;
-                margin-top: 1em;
-                padding: 15px;
+                margin-top: 1.5em;
+                padding: 20px;
+                border: 1px solid #3498db;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
             }
             QLabel {
                 color: #2c3e50;
             }
             QLineEdit {
-                padding: 8px;
+                padding: 12px;
                 border: 2px solid #3498db;
                 border-radius: 5px;
-                background-color: white;
+                background-color: #ffffff;
                 font-size: 16px;
                 text-align: center;
+                color: #2c3e50;
+                selection-background-color: #3498db;
+                min-height: 35px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2980b9;
+                background-color: #ecf0f1;
             }
             QPushButton {
                 background-color: #3498db;
                 color: white;
                 border: none;
-                padding: 8px 15px;
+                padding: 10px 20px;
                 border-radius: 5px;
                 min-width: 100px;
+                font-weight: bold;
+                min-height: 35px;
             }
             QPushButton:hover {
                 background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #1f618d;
+            }
+            QDialogButtonBox {
+                button-layout: center;
             }
         """)
         
@@ -535,33 +556,51 @@ class PinDialog(QDialog):
         
         pin_group = QGroupBox()
         pin_layout = QVBoxLayout(pin_group)
+        pin_layout.setSpacing(12)
+        pin_layout.setContentsMargins(15, 15, 15, 15)
         
         instruction_text = "Set a 4-digit PIN to secure the application:" if self.setup_mode else "Enter your 4-digit security PIN:"
         instruction_label = QLabel(instruction_text)
-        instruction_label.setFont(QFont("Segoe UI", 10))
+        instruction_label.setFont(QFont("Segoe UI", 11))
         instruction_label.setAlignment(Qt.AlignCenter)
+        instruction_label.setStyleSheet("color: #2c3e50; font-weight: 500;")
         pin_layout.addWidget(instruction_label)
+        
+        pin_layout.addSpacing(5)
+        
+        pin_label = QLabel("Enter PIN:")
+        pin_label.setFont(QFont("Segoe UI", 11))
+        pin_label.setStyleSheet("color: #2c3e50; font-weight: bold;")
+        pin_layout.addWidget(pin_label)
         
         self.pin_edit = QLineEdit()
         self.pin_edit.setEchoMode(QLineEdit.Password)
         self.pin_edit.setMaxLength(4)
         self.pin_edit.setAlignment(Qt.AlignCenter)
-        self.pin_edit.setFont(QFont("Segoe UI", 16))
+        self.pin_edit.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.pin_edit.setMinimumHeight(50)
+        self.pin_edit.setPlaceholderText("••••")
         pin_layout.addWidget(self.pin_edit)
         
         if self.setup_mode:
+            pin_layout.addSpacing(8)
+            
+            confirm_label = QLabel("Confirm PIN:")
+            confirm_label.setFont(QFont("Segoe UI", 11))
+            confirm_label.setStyleSheet("color: #2c3e50; font-weight: bold;")
+            pin_layout.addWidget(confirm_label)
+            
             self.confirm_pin_edit = QLineEdit()
             self.confirm_pin_edit.setEchoMode(QLineEdit.Password)
             self.confirm_pin_edit.setMaxLength(4)
             self.confirm_pin_edit.setAlignment(Qt.AlignCenter)
-            self.confirm_pin_edit.setFont(QFont("Segoe UI", 16))
-            confirm_label = QLabel("Confirm PIN:")
-            confirm_label.setFont(QFont("Segoe UI", 10))
-            confirm_label.setAlignment(Qt.AlignCenter)
-            pin_layout.addWidget(confirm_label)
+            self.confirm_pin_edit.setFont(QFont("Segoe UI", 18, QFont.Bold))
+            self.confirm_pin_edit.setMinimumHeight(50)
+            self.confirm_pin_edit.setPlaceholderText("••••")
             pin_layout.addWidget(self.confirm_pin_edit)
         
         layout.addWidget(pin_group)
+        layout.addSpacing(10)
         
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.button(QDialogButtonBox.Ok).setText("Set PIN" if self.setup_mode else "Submit")

@@ -31,3 +31,4 @@ bcrypt==4.1.2
 wmi==1.5.1
 psutil==5.9.6
 PyInstaller==6.3.0
+pyzbar

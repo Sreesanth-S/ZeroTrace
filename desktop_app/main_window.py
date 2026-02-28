@@ -816,6 +816,8 @@ class ZeroTraceMainWindow(QMainWindow):
             f"Model: {self.current_device.model or 'Unknown'} | "
             f"Serial: {self.current_device.serial or 'N/A'}"
         )
+        if getattr(self.current_device, 'hpa_enabled', False):
+            info_text += f" | Hidden sectors: {self.current_device.hpa_hidden_sectors}"
         
         if self.current_device.is_frozen:
             info_text += " | ⚠️ FROZEN - Power cycle required"
@@ -878,6 +880,14 @@ class ZeroTraceMainWindow(QMainWindow):
         # SSD warnings
         if self.current_device.drive_type in [DriveType.SATA_SSD, DriveType.NVME_SSD]:
             if selected_method in [WipeMethod.DOD_3_PASS, WipeMethod.DOD_7_PASS, WipeMethod.GUTMANN_35_PASS]:
+                warnings.append("Software multi-pass wipes can reduce SSD lifespan and may be unnecessary.")
+
+        # hidden sector method information
+        if selected_method == WipeMethod.HIDDEN_SECTORS:
+            if getattr(self.current_device, 'hpa_enabled', False):
+                warnings.append(f"Drive has {self.current_device.hpa_hidden_sectors} hidden sectors; only those will be erased.")
+            else:
+                warnings.append("No hidden sectors detected; this operation will do nothing.")
                 warnings.append("⚠️ Multi-pass overwrite is not recommended for SSDs and may reduce lifespan.")
         
         # Frozen drive warnings
@@ -917,14 +927,15 @@ class ZeroTraceMainWindow(QMainWindow):
         
         # Build confirmation message
         confirm_msg = (
-            f"⚠️ DESTRUCTIVE OPERATION WARNING ⚠️\n\n"
-            f"You are about to PERMANENTLY ERASE ALL DATA on:\n\n"
-            f"Drive: {self.current_device.name}\n"
-            f"Type: {self.current_device.drive_type.value}\n"
-            f"Size: {self.current_device.size_gb:.2f} GB\n"
-            f"Path: {self.current_device.path}\n\n"
-            f"Method: {selected_method}\n\n"
-            f"THIS ACTION CANNOT BE UNDONE!\n\n"
+            f"⚠️ DESTRUCTIVE OPERATION WARNING ⚠️\n\n",
+            f"You are about to PERMANENTLY ERASE ALL DATA on:\n\n",
+            f"Drive: {self.current_device.name}\n",
+            f"Type: {self.current_device.drive_type.value}\n",
+            f"Size: {self.current_device.size_gb:.2f} GB\n",
+            f"Path: {self.current_device.path}\n\n",
+            f"Method: {selected_method}\n\n" +
+            ("* Only hidden (HPA/DCO) areas will be erased. Visible data will be untouched.\n\n" if selected_method == WipeMethod.HIDDEN_SECTORS else ""),
+            f"THIS ACTION CANNOT BE UNDONE!\n\n",
             f"Are you absolutely sure you want to continue?"
         )
         
@@ -1067,11 +1078,12 @@ class ZeroTraceMainWindow(QMainWindow):
             
             # Generate and sign certificate
             self.log("Creating signed certificate...")
-            json_path, pdf_path, cert_data = self.certificate_manager.generate_and_sign_certificate(cert_wipe_data)
+            json_path, pdf_path, qr_path, cert_data = self.certificate_manager.generate_and_sign_certificate(cert_wipe_data)
             
             self.log(f"✓ Certificate generated: {cert_data['cert_id']}")
             self.log(f"  JSON: {json_path}")
             self.log(f"  PDF: {pdf_path}")
+            self.log(f"  QR Code: {qr_path}")
             
             # Try to upload certificate if user is logged in
             uploaded = False

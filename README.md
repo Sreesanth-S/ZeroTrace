@@ -6,6 +6,7 @@ ZeroTrace is a secure, cross-platform data wiping solution that enables users to
 
 - Secure wiping of HDDs, SSDs, NVMe, USB, smartphones (via Android)  
 - Uses controller-level erase (e.g. ATA/NVMe) where supported, fallback to overwrite  
+- Detects and optionally wipes hidden/Host Protected Area (HPA/DCO) sectors on drives
 - Generates digitally signed certificates (JSON + PDF) with QR / hash for verification  
 - Public web portal for certificate verification  
 - User dashboard showing wiped devices  

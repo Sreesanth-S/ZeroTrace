@@ -6,51 +6,72 @@ Handles digital signature generation and verification using ECDSA
 import json
 import hashlib
 import base64
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 from Crypto.PublicKey import ECC
 from Crypto.Signature import DSS
 from Crypto.Hash import SHA256
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).with_name(".env"))
 
 
 class CertificateSigner:
     """Handle digital signing of certificates"""
     
-    def __init__(self, private_key_path: Optional[str] = None, public_key_path: Optional[str] = None):
+    def __init__(
+        self,
+        private_key_path: Optional[str] = None,
+        public_key_path: Optional[str] = None,
+        private_key_pem: Optional[str] = None,
+        public_key_pem: Optional[str] = None
+    ):
+        # Keep path args for backward compatibility, but prefer environment keys.
         self.private_key_path = Path(private_key_path) if private_key_path else Path("keys/private_key.pem")
         self.public_key_path = Path(public_key_path) if public_key_path else Path("keys/public_key.pem")
-        
-        # Ensure keys directory exists
-        self.private_key_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Load or generate keys
-        if not self.private_key_path.exists():
+        self.private_key_pem = private_key_pem or self._read_env_key("SIGNING_PRIVATE_KEY_PEM")
+        self.public_key_pem = public_key_pem or self._read_env_key("SIGNING_PUBLIC_KEY_PEM")
+
+        # Backward-compatible fallback: read legacy key files if env vars are missing.
+        if not self.private_key_pem and self.private_key_path.exists():
+            with open(self.private_key_path, 'r') as f:
+                self.private_key_pem = f.read()
+
+        if not self.public_key_pem and self.public_key_path.exists():
+            with open(self.public_key_path, 'r') as f:
+                self.public_key_pem = f.read()
+
+        # If neither source exists, generate keys in-memory (do not write folders/files).
+        if not self.private_key_pem or not self.public_key_pem:
             self.generate_keys()
+
+    def _read_env_key(self, env_name: str) -> Optional[str]:
+        value = os.getenv(env_name)
+        if not value:
+            return None
+        # Support multi-line PEM represented with escaped newlines in .env.
+        return value.replace("\\n", "\n")
     
     def generate_keys(self):
-        """Generate new ECC key pair"""
+        """Generate new ECC key pair in memory"""
         key = ECC.generate(curve='P-256')
-        
-        # Save private key
-        with open(self.private_key_path, 'wb') as f:
-            f.write(key.export_key(format='PEM').encode())
-        
-        # Save public key
-        with open(self.public_key_path, 'wb') as f:
-            f.write(key.public_key().export_key(format='PEM').encode())
-        
-        print(f"Generated new key pair at {self.private_key_path}")
+        self.private_key_pem = key.export_key(format='PEM')
+        self.public_key_pem = key.public_key().export_key(format='PEM')
     
     def load_private_key(self) -> ECC.EccKey:
-        """Load private key from file"""
-        with open(self.private_key_path, 'r') as f:
-            return ECC.import_key(f.read())
+        """Load private key from environment or fallback source"""
+        if not self.private_key_pem:
+            raise ValueError("SIGNING_PRIVATE_KEY_PEM is not set")
+        return ECC.import_key(self.private_key_pem)
     
     def load_public_key(self) -> ECC.EccKey:
-        """Load public key from file"""
-        with open(self.public_key_path, 'r') as f:
-            return ECC.import_key(f.read())
+        """Load public key from environment or fallback source"""
+        if not self.public_key_pem:
+            raise ValueError("SIGNING_PUBLIC_KEY_PEM is not set")
+        return ECC.import_key(self.public_key_pem)
     
     def generate_certificate_hash(self, cert_data: Dict) -> str:
         # Remove signature if present to avoid circular dependency

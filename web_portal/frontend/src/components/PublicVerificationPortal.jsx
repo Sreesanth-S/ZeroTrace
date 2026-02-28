@@ -2,49 +2,38 @@ import React, { useState } from 'react';
 import QrScanner from './QrScanner';
 import { supabaseKey } from '../lib/supabase';
 
-const PublicVerificationPortal = ({ setView }) => {
-  const [certificateId, setCertificateId] = useState('');
-  // State to manage the active verification mode: 'manual', 'pdf', or 'scan'
-  const [verificationMode, setVerificationMode] = useState('manual');
+const PublicVerificationPortal = () => {
+  const [verificationMode, setVerificationMode] = useState('pdf');
   const [verificationResult, setVerificationResult] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
 
-  const handleManualVerification = async (e) => {
-    e.preventDefault();
-    if (certificateId.trim() === '') return;
-
-    setIsLoading(true);
-    setVerificationResult(null);
+  const extractVerificationHash = (rawScanValue) => {
+    const value = String(rawScanValue || '').trim();
+    if (!value) return '';
 
     try {
-      const response = await fetch(`http://localhost:5000/api/verify/id/${certificateId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': supabaseKey,
-        },
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setVerificationResult(data);
-      } else {
-        setVerificationResult({ error: data.message || 'Verification failed' });
-      }
-    } catch (error) {
-      console.error('Verification error:', error);
-      setVerificationResult({ error: 'Network error. Please try again.' });
-    } finally {
-      setIsLoading(false);
+      const parsed = JSON.parse(value);
+      if (parsed?.verification_hash) return String(parsed.verification_hash).trim();
+    } catch {
+      // Continue with URL/plain-text parsing
     }
+
+    try {
+      const asUrl = new URL(value);
+      const queryHash = asUrl.searchParams.get('hash');
+      if (queryHash) return queryHash.trim();
+    } catch {
+      // Not a URL, continue
+    }
+
+    const hexHashRegex = /^[A-Fa-f0-9]{64}$/;
+    if (hexHashRegex.test(value)) return value;
+
+    return '';
   };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    setIsLoading(true);
     setVerificationResult(null);
 
     try {
@@ -67,60 +56,46 @@ const PublicVerificationPortal = ({ setView }) => {
       console.error('File upload error:', error);
       setVerificationResult({ error: 'Network error. Please try again.' });
     } finally {
-      setIsLoading(false);
       // Clear file input
       e.target.value = '';
     }
   };
 
+  const verifyByHash = async (hash) => {
+    if (!hash) return;
+    setVerificationResult(null);
+    try {
+      const response = await fetch('http://localhost:5000/api/verify/hash', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseKey,
+        },
+        body: JSON.stringify({ hash }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setVerificationResult(data);
+      } else {
+        setVerificationResult({ error: data.error || data.message || 'Verification failed' });
+      }
+    } catch (error) {
+      console.error('QR verification error:', error);
+      setVerificationResult({ error: 'Network error. Please try again.' });
+    }
+  };
+
   const handleScanResult = (result) => {
-    console.log('Scan result:', result);
-    // Handle the verification logic here, e.g., navigate to a URL
-    window.location.href = result; 
+    const hash = extractVerificationHash(result);
+    if (!hash) {
+      setVerificationResult({ error: 'QR code does not contain a valid verification hash.' });
+      return;
+    }
+    verifyByHash(hash);
   };
 
   const renderVerificationContent = () => {
     switch (verificationMode) {
-      case 'manual':
-        return (
-          <section>
-            <h2>Verify by Entering ID</h2>
-            <div className="verification-box">
-              <form onSubmit={handleManualVerification}>
-                <input
-                  type="text"
-                  value={certificateId}
-                  onChange={(e) => setCertificateId(e.target.value)}
-                  placeholder="Enter Certificate ID"
-                  required
-                />
-                <button type="submit" disabled={isLoading}>
-                  {isLoading ? 'Verifying...' : 'Verify Certificate'}
-                </button>
-              </form>
-              {verificationResult && (
-                <div className="verification-result" style={{ marginTop: '20px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
-                  {verificationResult.error ? (
-                    <p style={{ color: 'red' }}>{verificationResult.error}</p>
-                  ) : (
-                    <div>
-                      <p><strong>Status:</strong> {verificationResult.status}</p>
-                      <p><strong>Message:</strong> {verificationResult.message}</p>
-                      {verificationResult.details && (
-                        <div>
-                          <p><strong>Certificate ID:</strong> {verificationResult.cert_id}</p>
-                          <p><strong>Device Name:</strong> {verificationResult.details.device_name}</p>
-                          <p><strong>Wipe Date:</strong> {verificationResult.details.wipe_date}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </section>
-        );
-
       case 'pdf':
         return (
           <section>
@@ -130,7 +105,7 @@ const PublicVerificationPortal = ({ setView }) => {
               <form>
                 <input
                   type="file"
-                  accept=".json"
+                  accept=".pdf,.json"
                   onChange={handleFileUpload}
                   required
                 />
@@ -185,15 +160,6 @@ const PublicVerificationPortal = ({ setView }) => {
 
       {/* Navigation Tabs for Verification Options */}
       <div className="top-nav">
-        <button 
-          style={{ 
-            backgroundColor: verificationMode === 'manual' ? '#1e7e34' : '#28a745',
-            color: 'white',
-          }}
-          onClick={() => setVerificationMode('manual')}
-        >
-          Manual ID
-        </button>
         <button
           style={{
             backgroundColor: verificationMode === 'pdf' ? '#1e7e34' : '#28a745',
@@ -223,4 +189,5 @@ const PublicVerificationPortal = ({ setView }) => {
 
 // This is the line that must be present
 export default PublicVerificationPortal;
+
 

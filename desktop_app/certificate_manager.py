@@ -103,7 +103,12 @@ class CertificateManager:
         
         return cert_data
     
-    def generate_and_sign_certificate(self, wipe_result: Dict) -> Tuple[Path, Path, Dict]:
+    def generate_and_sign_certificate(self, wipe_result: Dict) -> Tuple[Path, Path, Path, Dict]:
+        """Generate, sign, and create certificate artifacts including QR code
+        
+        Returns:
+            Tuple of (json_path, pdf_path, qr_path, signed_cert)
+        """
         # Create certificate data
         cert_data = self.create_certificate_data(wipe_result)
         
@@ -120,7 +125,22 @@ class CertificateManager:
         # Generate PDF
         pdf_path = self.pdf_generator.generate_certificate(signed_cert, json_filename.replace('.json', '.pdf'))
         
-        return json_path, pdf_path, signed_cert
+        # Generate standalone QR code image with verification hash
+        verification_hash = signed_cert.get('_signature', {}).get('verification_hash', '')
+        if not verification_hash:
+            verification_hash = signed_cert.get('verification', {}).get('completion_hash', '')
+        
+        qr_filename = json_filename.replace('.json', '_qr.png')
+        qr_path = self.pdf_generator.generate_qr_code_image(
+            cert_id=signed_cert['cert_id'],
+            verification_hash=verification_hash,
+            device_id=signed_cert.get('device_id', ''),
+            method=signed_cert.get('method_used', ''),
+            output_name=qr_filename
+        )
+        
+        logger.info(f"Generated certificate artifacts: JSON, PDF, and QR code for {signed_cert['cert_id']}")
+        return json_path, pdf_path, qr_path, signed_cert
     
     def upload_certificate(self, json_path: Path, pdf_path: Path, cert_data: Dict) -> bool:
         """
@@ -237,12 +257,13 @@ class CertificateManager:
     def process_wipe_completion(self, wipe_result: Dict, auto_upload: bool = True) -> Dict:
         try:
             # Generate and sign certificate
-            json_path, pdf_path, cert_data = self.generate_and_sign_certificate(wipe_result)
+            json_path, pdf_path, qr_path, cert_data = self.generate_and_sign_certificate(wipe_result)
             
             result = {
                 'success': True,
                 'json_path': str(json_path),
                 'pdf_path': str(pdf_path),
+                'qr_path': str(qr_path),
                 'cert_id': cert_data['cert_id'],
                 'uploaded': False
             }

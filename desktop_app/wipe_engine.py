@@ -181,6 +181,9 @@ class WipeMethod:
     DOD_7_PASS = "DoD 7-Pass"
     GUTMANN_35_PASS = "Gutmann 35-Pass"
 
+    # Hidden/host protected area
+    HIDDEN_SECTORS = "Hidden Sector Wipe (HPA/DCO)"
+
 
 class WipePattern:
     """Patterns for secure wiping"""
@@ -209,6 +212,13 @@ class DeviceInfo:
         self.supports_nvme_sanitize = False
         self.is_frozen = False
         self.is_system_drive = False
+
+        # Host Protected Area (HPA) / hidden sector info
+        # these values are populated when checking ATA support
+        self.hpa_enabled = False
+        self.hpa_user_sectors = 0
+        self.hpa_max_sectors = 0
+        self.hpa_hidden_sectors = 0
 
 
 # ATA command structures
@@ -382,6 +392,31 @@ class WipeEngine:
                         device_info.is_frozen = True
                         logger.warning(f"Drive {device_info.name} is in frozen state")
 
+                    # detect hidden sectors / HPA
+                    try:
+                        # word 60-61 = user addressable sectors (28bit)
+                        user_lo = struct.unpack('<H', identify_data[120:122])[0]
+                        user_hi = struct.unpack('<H', identify_data[122:124])[0]
+                        user_sectors = (user_hi << 16) | user_lo
+
+                        # word 100-103 = max addressable LBA for HPA/DCO (may be 48-bit)
+                        # combine four words (100..103) little-endian
+                        max_low = struct.unpack('<H', identify_data[200:202])[0]
+                        max_mid = struct.unpack('<H', identify_data[202:204])[0]
+                        max_high = struct.unpack('<H', identify_data[204:206])[0]
+                        max_hi = struct.unpack('<H', identify_data[206:208])[0]
+                        max_sectors = (max_hi << 48) | (max_high << 32) | (max_mid << 16) | max_low
+
+                        if max_sectors > user_sectors:
+                            device_info.hpa_enabled = True
+                            device_info.hpa_user_sectors = user_sectors
+                            device_info.hpa_max_sectors = max_sectors
+                            device_info.hpa_hidden_sectors = max_sectors - user_sectors
+                            logger.info(f"Detected HPA on {device_info.name}: hidden {device_info.hpa_hidden_sectors} sectors")
+                    except Exception as _:
+                        # ignore if identify data truncated or parsing fails
+                        pass
+
             finally:
                 win32file.CloseHandle(handle)
 
@@ -416,6 +451,107 @@ class WipeEngine:
             logger.debug(f"ATA IDENTIFY failed: {e}")
             return None
 
+    def _get_hpa_info(self, handle) -> Optional[Dict[str, int]]:
+        """Return HPA/hidden sector information for a drive handle.
+
+        The returned dict contains keys:
+            user_sectors, max_sectors, hidden_sectors, hpa_enabled
+        """
+        try:
+            identify_data = self._send_ata_identify(handle)
+            if not identify_data or len(identify_data) < 208:
+                return None
+
+            # user addressable sectors (words 60-61)
+            user_lo = struct.unpack('<H', identify_data[120:122])[0]
+            user_hi = struct.unpack('<H', identify_data[122:124])[0]
+            user_sectors = (user_hi << 16) | user_lo
+
+            # maximum addressable LBA (words 100-103, 48-bit value)
+            # treat as little-endian 4 words
+            max_low = struct.unpack('<H', identify_data[200:202])[0]
+            max_mid = struct.unpack('<H', identify_data[202:204])[0]
+            max_high = struct.unpack('<H', identify_data[204:206])[0]
+            max_hi = struct.unpack('<H', identify_data[206:208])[0]
+            max_sectors = (max_hi << 48) | (max_high << 32) | (max_mid << 16) | max_low
+
+            hidden = max_sectors - user_sectors if max_sectors > user_sectors else 0
+            return {
+                'user_sectors': user_sectors,
+                'max_sectors': max_sectors,
+                'hidden_sectors': hidden,
+                'hpa_enabled': hidden > 0
+            }
+        except Exception as e:
+            logger.debug(f"Error getting HPA info: {e}")
+            return None
+
+    def _set_hpa_size(self, handle, sectors: int) -> bool:
+        """Set the host protected area limit (maximum addressable sectors).
+
+        """
+        try:
+            # Prepare taskfile registers for SET MAX ADDRESS (0xF9)
+            ata_pt = ATAPassThroughDirect()
+            ata_pt.Length = ctypes.sizeof(ATAPassThroughDirect)
+            ata_pt.AtaFlags = 0x00  # no data transfer
+            ata_pt.DataTransferLength = 0
+            ata_pt.TimeOutValue = 10
+
+            # build 48-bit LBA value into registers
+            lba = sectors
+            ata_pt.CurrentTaskFile[2] = lba & 0xFF  # LBA low
+            ata_pt.CurrentTaskFile[3] = (lba >> 8) & 0xFF  # LBA mid
+            ata_pt.CurrentTaskFile[4] = (lba >> 16) & 0xFF  # LBA high
+            # device register: set LBA mode bit (bit 6)
+            ata_pt.CurrentTaskFile[5] = 0x40
+
+            # high-order bytes for 48-bit
+            ata_pt.CurrentTaskFile[0] = (lba >> 24) & 0xFF  # feature high? using feature reg for high
+            ata_pt.CurrentTaskFile[1] = (lba >> 32) & 0xFF  # sector count high? reuse
+            ata_pt.CurrentTaskFile[2] |= (lba >> 40) & 0xFF  # extend LBA into low reg
+
+            ata_pt.CurrentTaskFile[6] = 0xF9  # SET MAX ADDRESS
+
+            result = win32file.DeviceIoControl(
+                handle,
+                self.IOCTL_ATA_PASS_THROUGH,
+                ata_pt,
+                0
+            )
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"Failed to set HPA size: {e}")
+            return False
+
+    def _wipe_hidden_area(self, handle, start_bytes: int, length: int,
+                          progress_callback: Optional[Callable[[int, str], None]] = None):
+        """Overwrite a region of the drive starting at *start_bytes* for *length* bytes.
+
+        Used for wiping previously hidden sectors after HPA is removed.
+        """
+        if length <= 0:
+            return
+
+        win32file.SetFilePointer(handle, start_bytes, win32con.FILE_BEGIN)
+        bytes_written = 0
+        buffer = bytes(self._buffer_size)
+        last_progress = 0
+
+        while bytes_written < length and not self._stop_requested:
+            write_size = min(self._buffer_size, length - bytes_written)
+            error_code, _ = win32file.WriteFile(handle, buffer[:write_size])
+            if error_code != 0:
+                raise Exception(f"Hidden area write failed: {error_code}")
+
+            bytes_written += write_size
+            if progress_callback:
+                pct = int(bytes_written / length * 100)
+                if pct - last_progress >= 1:
+                    progress_callback(pct, "Wiping hidden sectors")
+                    last_progress = pct
+            time.sleep(0.001)
+
     def detect_best_wipe_method(self, device_info: DeviceInfo) -> Dict[str, str]:
         """Detect the best wiping method for the given device"""
         if device_info.is_system_drive:
@@ -424,56 +560,66 @@ class WipeEngine:
                 'reason': 'System drive - hardware erase disabled for safety'
             }
 
+        # compute normal best method (see logic below)
+
+        best_method = None
         if device_info.drive_type == DriveType.NVME_SSD:
             if device_info.supports_nvme_sanitize:
-                return {
+                best_method = {
                     'method': WipeMethod.NVME_SANITIZE_CRYPTO,
                     'reason': 'NVMe Crypto Erase provides instant secure erasure'
                 }
             elif device_info.supports_nvme_format:
-                return {
+                best_method = {
                     'method': WipeMethod.NVME_FORMAT,
                     'reason': 'NVMe Format NVM resets all cells'
                 }
 
         elif device_info.drive_type == DriveType.SATA_SSD:
             if device_info.is_frozen:
-                return {
+                best_method = {
                     'method': WipeMethod.QUICK,
                     'reason': 'Drive is frozen - power cycle required for ATA Secure Erase'
                 }
             elif device_info.supports_ata_enhanced_secure_erase:
-                return {
+                best_method = {
                     'method': WipeMethod.ATA_ENHANCED_SECURE_ERASE,
                     'reason': 'Enhanced Secure Erase ensures all cells are erased'
                 }
             elif device_info.supports_ata_secure_erase:
-                return {
+                best_method = {
                     'method': WipeMethod.ATA_SECURE_ERASE,
                     'reason': 'ATA Secure Erase is faster and more effective for SSDs'
                 }
 
         elif device_info.drive_type == DriveType.HDD:
             if device_info.is_frozen:
-                return {
+                best_method = {
                     'method': WipeMethod.DOD_3_PASS,
                     'reason': 'Drive is frozen - using software overwrite'
                 }
             elif device_info.supports_ata_secure_erase:
-                return {
+                best_method = {
                     'method': WipeMethod.ATA_SECURE_ERASE,
                     'reason': 'ATA Secure Erase is firmware-based and reliable'
                 }
             else:
-                return {
+                best_method = {
                     'method': WipeMethod.DOD_3_PASS,
                     'reason': 'DoD 3-Pass provides good security for HDDs'
                 }
 
-        return {
-            'method': WipeMethod.QUICK,
-            'reason': 'Software overwrite for maximum compatibility'
-        }
+        if not best_method:
+            best_method = {
+                'method': WipeMethod.QUICK,
+                'reason': 'Software overwrite for maximum compatibility'
+            }
+
+        # annotate if hidden sectors are present
+        if getattr(device_info, 'hpa_enabled', False):
+            best_method['reason'] += f" (contains {device_info.hpa_hidden_sectors} hidden sectors)"
+
+        return best_method
 
     def get_supported_methods(self, device_info: DeviceInfo) -> List[str]:
         """Get list of supported wipe methods for device"""
@@ -495,6 +641,10 @@ class WipeEngine:
             
             if device_info.supports_ata_secure_erase and not device_info.is_frozen:
                 methods.append(WipeMethod.ATA_SECURE_ERASE)
+
+            # if the drive has a host-protected area (hidden sectors), allow explicit wipe
+            if getattr(device_info, 'hpa_enabled', False):
+                methods.append(WipeMethod.HIDDEN_SECTORS)
         
         methods.extend([
             WipeMethod.QUICK,
@@ -545,9 +695,12 @@ class WipeEngine:
             elif method in [WipeMethod.NVME_SANITIZE_CRYPTO, WipeMethod.NVME_SANITIZE_BLOCK, 
                            WipeMethod.NVME_SANITIZE_OVERWRITE]:
                 result = self._perform_nvme_sanitize(device_info, method, progress_callback, result)
+
+            elif method == WipeMethod.HIDDEN_SECTORS:
+                result = self._perform_hidden_sector_wipe(device_info, progress_callback, result)
             
             else:
-                # Software overwrite methods
+                # Software overwrite methods (automatically handle any hidden zones)
                 result = self._perform_software_wipe(device_info, method, progress_callback, result)
 
         except Exception as e:
@@ -622,6 +775,71 @@ class WipeEngine:
             result['status'] = 'Failed'
             return result
 
+    def _perform_hidden_sector_wipe(self, device_info: DeviceInfo,
+                                    progress_callback: Optional[Callable], result: Dict) -> Dict:
+        """Wipe only the hidden sectors that are masked by HPA/DCO."""
+        try:
+            # Access drive and check HPA info
+            can_access, error_msg = self.validate_drive_access(device_info.path)
+            if not can_access:
+                result['error'] = error_msg
+                result['status'] = 'Failed'
+                return result
+
+            # open handle similar to software wipe
+            handle = win32file.CreateFile(
+                device_info.path,
+                win32con.GENERIC_WRITE,
+                win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
+                None,
+                win32con.OPEN_EXISTING,
+                win32con.FILE_FLAG_NO_BUFFERING | win32con.FILE_FLAG_WRITE_THROUGH,
+                None
+            )
+
+            try:
+                if progress_callback:
+                    progress_callback(0, "Checking for hidden sectors...")
+
+                hpa_info = self._get_hpa_info(handle)
+                if not hpa_info or not hpa_info.get('hpa_enabled'):
+                    result['status'] = 'Failed'
+                    result['error'] = 'No hidden sectors detected on this drive'
+                    return result
+
+                hidden_sectors = hpa_info['hidden_sectors']
+                start_offset = hpa_info['user_sectors'] * self._sector_size
+                total_bytes = hidden_sectors * self._sector_size
+
+                if progress_callback:
+                    progress_callback(10, f"Exposing hidden area ({hidden_sectors} sectors)")
+
+                # disable HPA to expose full capacity
+                self._set_hpa_size(handle, hpa_info['max_sectors'])
+
+                # wipe the hidden region with a single zero pass
+                if progress_callback:
+                    progress_callback(20, "Wiping hidden sectors...")
+
+                self._wipe_hidden_area(handle, start_offset, total_bytes, progress_callback)
+                result['passes_completed'] = 1
+
+                # restore original HPA limit
+                self._set_hpa_size(handle, hpa_info['user_sectors'])
+                logger.info("Hidden sector wipe completed and HPA limit restored")
+
+                result['status'] = 'Completed'
+                result['success'] = True
+            finally:
+                win32file.CloseHandle(handle)
+
+        except Exception as e:
+            logger.error(f"Hidden sector wipe failed: {e}")
+            result['error'] = str(e)
+            result['status'] = 'Failed'
+
+        return result
+
     def _perform_software_wipe(self, device_info: DeviceInfo, method: str,
                                 progress_callback: Optional[Callable], result: Dict) -> Dict:
         """Perform software overwrite wipe with automatic reformatting"""
@@ -679,6 +897,25 @@ class WipeEngine:
                 
                 self._dismount_drive_volumes(device_info.path)
 
+                # determine if drive has a Host Protected Area
+                hpa_info = self._get_hpa_info(handle)
+                original_size = device_info.size
+                wipe_size = device_info.size
+
+                if hpa_info and hpa_info.get('hpa_enabled'):
+                    # expose the full capacity
+                    if progress_callback:
+                        progress_callback(0, "Removing HPA limit to expose hidden sectors...")
+                    logger.info(f"HPA detected: {hpa_info['hidden_sectors']} hidden sectors")
+
+                    # expand to maximum LBA
+                    if self._set_hpa_size(handle, hpa_info['max_sectors']):
+                        wipe_size = hpa_info['max_sectors'] * self._sector_size
+                        # update device_info.size so logs/report reflect new size
+                        device_info.size = wipe_size
+                    else:
+                        logger.warning("Failed to remove HPA limit; hidden sectors may not be wiped")
+
                 # Determine passes
                 if method == WipeMethod.QUICK:
                     passes = [WipePattern.ZEROS]
@@ -706,9 +943,19 @@ class WipeEngine:
                             f"Pass {pass_num}/{total_passes}: Writing {self._get_pattern_name(pattern)}"
                         )
 
-                    self._wipe_pass(handle, device_info.size, pattern, pass_num, total_passes, 
+                    self._wipe_pass(handle, wipe_size, pattern, pass_num, total_passes, 
                                    progress_callback, max_progress=90)
                     result['passes_completed'] = pass_num
+
+                # restore HPA if we changed it
+                if hpa_info and hpa_info.get('hpa_enabled'):
+                    try:
+                        self._set_hpa_size(handle, hpa_info['user_sectors'])
+                        logger.info("HPA limit restored after wipe")
+                        # revert device_info.size to original for reporting purposes
+                        device_info.size = original_size
+                    except Exception:
+                        pass
 
                 if not self._stop_requested:
                     if progress_callback:

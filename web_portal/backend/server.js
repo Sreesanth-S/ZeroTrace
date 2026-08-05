@@ -7,16 +7,23 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+
 // Import routes
 import authRoutes from './routes/auth.js';
 import certificatesRoutes from './routes/certificates.js';
 import verificationRoutes from './routes/verification.js';
+import signingRoutes from './routes/signing.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Create Express app
 const app = express();
+
+// Security Headers via Helmet
+app.use(helmet());
 
 // Configuration
 const config = {
@@ -41,6 +48,23 @@ if (!existsSync(config.uploadFolder)) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Rate Limiters
+const verifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // Limit each IP to 30 requests per windowMs
+  message: { error: 'Too many verification attempts from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const signingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60,
+  message: { error: 'Too many signing requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // CORS configuration
 app.use(cors({
   origin: config.corsOrigins,
@@ -60,10 +84,11 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Register routes
+// Register routes with rate limiting
 app.use('/api/auth', authRoutes);
 app.use('/api/certificates', certificatesRoutes);
-app.use('/api/verify', verificationRoutes);
+app.use('/api/certificates', signingLimiter, signingRoutes);
+app.use('/api/verify', verifyLimiter, verificationRoutes);
 
 // Error handlers
 app.use((req, res) => {

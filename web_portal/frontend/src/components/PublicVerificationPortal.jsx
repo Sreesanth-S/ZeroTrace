@@ -123,6 +123,16 @@ const PublicVerificationPortal = () => {
                           <p><strong>Certificate ID:</strong> {verificationResult.cert_id}</p>
                           <p><strong>Device Name:</strong> {verificationResult.details.device_name}</p>
                           <p><strong>Wipe Method:</strong> {verificationResult.details.wipe_method}</p>
+                          {verificationResult.details.compliance && (
+                            <div style={{ margin: '10px 0', padding: '10px', background: '#eff6ff', borderRadius: '6px', border: '1px solid #93c5fd' }}>
+                              <p style={{ margin: 0, fontWeight: 'bold', color: '#1e40af' }}>Security & Compliance Standards:</p>
+                              <p style={{ margin: '4px 0 0 0', fontSize: '0.9em', color: '#1e293b' }}>
+                                🛡️ <strong>NIST SP 800-88:</strong> {verificationResult.details.compliance.nist_800_88 || 'N/A'}<br/>
+                                ⚡ <strong>IEEE 2883-2022:</strong> {verificationResult.details.compliance.ieee_2883 || 'N/A'}<br/>
+                                🎖️ <strong>DoD 5220.22-M:</strong> {verificationResult.details.compliance.dod_5220_22_m || 'N/A'}
+                              </p>
+                            </div>
+                          )}
                           <p><strong>Wipe Date:</strong> {verificationResult.details.wipe_date}</p>
                           <p><strong>Signature Valid:</strong> {verificationResult.details.signature_valid ? 'Yes' : 'No'}</p>
                           <p><strong>Database Match:</strong> {verificationResult.details.database_match ? 'Yes' : 'No'}</p>
@@ -141,13 +151,12 @@ const PublicVerificationPortal = () => {
           <section>
             <h2>Scan QR Code</h2>
             <p>Scan a QR code on a physical certificate for quick verification.</p>
-            {/* The qr-scanner-container likely already provides the box styling */}
             <div className="qr-scanner-container">
               <QrScanner onResult={handleScanResult} />
             </div>
           </section>
         );
-        
+
       default:
         return null;
     }
@@ -187,7 +196,4 @@ const PublicVerificationPortal = () => {
   );
 };
 
-// This is the line that must be present
 export default PublicVerificationPortal;
-
-

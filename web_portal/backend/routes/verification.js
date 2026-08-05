@@ -49,9 +49,15 @@ function verifyCertificateSignature(certificate) {
   const signatureInfo = certificate?._signature || {};
   const storedHash = String(signatureInfo.verification_hash || '').trim().toLowerCase();
   const signatureB64 = signatureInfo.signature;
-  const publicKey = signatureInfo.public_key;
 
-  if (!storedHash || !signatureB64 || !publicKey) {
+  // Use server's pinned public key as authoritative trust anchor
+  const serverPublicKeyPem = process.env.SIGNING_PUBLIC_KEY_PEM
+    ? process.env.SIGNING_PUBLIC_KEY_PEM.replace(/\\n/g, '\n').replace(/^"|"$/g, '')
+    : null;
+
+  const publicKeyToUse = serverPublicKeyPem || signatureInfo.public_key;
+
+  if (!storedHash || !signatureB64 || !publicKeyToUse) {
     return { valid: false, reason: 'missing_signature_fields' };
   }
 
@@ -64,7 +70,7 @@ function verifyCertificateSignature(certificate) {
     const verifier = crypto.createVerify('sha256');
     verifier.update(storedHash, 'utf8');
     verifier.end();
-    const isValid = verifier.verify(publicKey, Buffer.from(signatureB64, 'base64'));
+    const isValid = verifier.verify(publicKeyToUse, Buffer.from(signatureB64, 'base64'));
     return { valid: isValid, reason: isValid ? 'ok' : 'signature_invalid', storedHash };
   } catch (error) {
     return { valid: false, reason: `signature_error:${error.message}` };

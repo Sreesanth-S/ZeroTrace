@@ -22,10 +22,9 @@ class LoginDialog(QDialog):
         try:
             supabase_url = os.getenv('SUPABASE_URL')
             supabase_key = os.getenv('SUPABASE_KEY')
-            supabase_service_key = os.getenv('SUPABASE_SERVICE_KEY')
             
-            if supabase_url and supabase_service_key:
-                self.supabase = create_client(supabase_url, supabase_service_key)
+            if supabase_url and supabase_key:
+                self.supabase = create_client(supabase_url, supabase_key)
                 self.supabase_available = True
             else:
                 self.supabase = None

@@ -36,7 +36,11 @@ class PDFCertificateGenerator:
         
         # Convert to BytesIO
         img_buffer = BytesIO()
-        img.save(img_buffer, format='PNG')
+        try:
+            # pyrefly: ignore [unexpected-keyword]
+            img.save(img_buffer, format='PNG')
+        except TypeError:
+            img.save(img_buffer)
         img_buffer.seek(0)
         
         # Create ReportLab Image
@@ -371,6 +375,67 @@ class PDFCertificateGenerator:
         story.append(Paragraph(marker_text, payload_style))
         return story
     
+    def create_compliance_section(self, cert_data: Dict, styles: Dict) -> list:
+        """Create Compliance & Security Standards section"""
+        story = []
+        compliance = cert_data.get('compliance', {})
+        if not compliance:
+            return story
+
+        story.append(Spacer(1, 0.2*inch))
+        
+        is_implemented = compliance.get('implemented', True)
+        header_color = colors.HexColor('#9a3412') if not is_implemented else colors.HexColor('#1e40af')
+
+        comp_header_style = ParagraphStyle(
+            'CompHeader',
+            parent=styles['Heading2'],
+            fontSize=13,
+            textColor=header_color,
+            spaceAfter=8
+        )
+        story.append(Paragraph("Compliance & Security Standards", comp_header_style))
+
+        comp_data = [
+            ["Sanitization Level:", compliance.get('level', 'N/A')],
+            ["NIST SP 800-88 Rev 1:", compliance.get('nist_800_88', 'N/A')],
+            ["IEEE 2883-2022:", compliance.get('ieee_2883', 'N/A')],
+            ["DoD 5220.22-M:", compliance.get('dod_5220_22_m', 'N/A')],
+        ]
+
+        bg_color = colors.HexColor('#fff7ed') if not is_implemented else colors.HexColor('#eff6ff')
+        grid_color = colors.HexColor('#fdba74') if not is_implemented else colors.HexColor('#93c5fd')
+
+        comp_table = Table(comp_data, colWidths=[2.2*inch, 4.0*inch])
+        comp_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), bg_color),
+            ('BACKGROUND', (1, 0), (1, -1), colors.white),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('GRID', (0, 0), (-1, -1), 0.5, grid_color),
+        ]))
+        story.append(comp_table)
+
+        if not is_implemented:
+            note_style = ParagraphStyle(
+                'FallbackNote',
+                parent=styles['Normal'],
+                fontSize=8,
+                textColor=colors.HexColor('#9a3412'),
+                spaceBefore=6,
+                fontName='Helvetica-Oblique'
+            )
+            note_text = (
+                "<b>Notice:</b> Hardware-level controller sanitization was unavailable on this system. "
+                "A software logical overwrite was executed as a fallback. "
+                "Compliance level is recorded as Clear (Software Fallback)."
+            )
+            story.append(Paragraph(note_text, note_style))
+
+        return story
+
     def generate_certificate(self, cert_data: Dict, filename: Optional[str] = None) -> Path:
         if not filename:
             cert_id = cert_data.get('cert_id', 'certificate')
@@ -395,12 +460,11 @@ class PDFCertificateGenerator:
         # Add sections
         story.extend(self.create_header(styles))
         story.append(self.create_certificate_info_table(cert_data))
+        story.extend(self.create_compliance_section(cert_data, styles))
         story.extend(self.create_signature_section(cert_data, styles))
         story.extend(self.create_qr_section(cert_data, styles))
         story.extend(self.create_machine_payload_section(cert_data, styles))
         story.extend(self.create_footer(styles))
-        
-        # Build PDF
         doc.build(story)
         
         print(f"Certificate PDF generated: {pdf_path}")

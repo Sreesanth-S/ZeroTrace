@@ -14,9 +14,6 @@ from typing import Dict
 import sys
 import os
 
-app_font = QFont("Segoe UI", 10)
-QApplication.setFont(app_font)
-
 sys.path.append(str(Path(__file__).parent.parent))
 
 # Define stylesheets
@@ -848,12 +845,16 @@ class ZeroTraceMainWindow(QMainWindow):
         self.log(f"Recommended method: {recommended_method}")
         self.log(f"  Reason: {best_method['reason']}")
         
+        from wipe_engine import get_compliance_info
+        
         # Populate combo box
         for method in supported_methods:
+            comp = get_compliance_info(method)
+            tag = f" [{comp['level']}]"
             if method == recommended_method:
-                display_text = f"{method} (Recommended)"
+                display_text = f"{method}{tag} (Recommended)"
             else:
-                display_text = method
+                display_text = f"{method}{tag}"
             
             self.method_combo.addItem(display_text, method)
         
@@ -864,7 +865,9 @@ class ZeroTraceMainWindow(QMainWindow):
                 break
         
         # Update info label
-        self.method_info_label.setText(best_method['reason'])
+        comp = get_compliance_info(recommended_method)
+        comp_summary = f"Standards: {comp['nist_800_88']} | {comp['ieee_2883']} | {comp['dod_5220_22_m']}\n{best_method['reason']}"
+        self.method_info_label.setText(comp_summary)
     
     def on_method_changed(self, index: int):
         """Handle method selection change"""
@@ -879,7 +882,7 @@ class ZeroTraceMainWindow(QMainWindow):
         
         # SSD warnings
         if self.current_device.drive_type in [DriveType.SATA_SSD, DriveType.NVME_SSD]:
-            if selected_method in [WipeMethod.DOD_3_PASS, WipeMethod.DOD_7_PASS, WipeMethod.GUTMANN_35_PASS]:
+            if selected_method in [WipeMethod.DOD_3_PASS, WipeMethod.DOD_7_PASS]:
                 warnings.append("Software multi-pass wipes can reduce SSD lifespan and may be unnecessary.")
 
         # hidden sector method information

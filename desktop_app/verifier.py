@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 from typing import Dict, Tuple, Optional
-from .signer import CertificateSigner
+
+try:
+    from signer import CertificateSigner
+except ImportError:
+    from .signer import CertificateSigner
 
 
 class CertificateVerifier:

@@ -9,18 +9,23 @@ load_dotenv()
 
 
 class SupabaseDesktopClient:
-    """Supabase client for desktop application"""
+    """Supabase client for desktop application.
+    
+    Uses the anon (public) key only.  All database operations are protected
+    by Supabase Row-Level Security (RLS) policies and scoped to the
+    authenticated user's JWT.  The service-role key must NEVER be shipped
+    in the desktop binary.
+    """
     
     def __init__(self):
-        """Initialize Supabase client"""
+        """Initialize Supabase client with anon key only"""
         self.url = os.getenv('SUPABASE_URL')
         self.key = os.getenv('SUPABASE_KEY')
-        self.service_role_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         if not self.url or not self.key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment")
         
-        self.client: Client = create_client(self.url, self.service_role_key)
+        self.client: Client = create_client(self.url, self.key)
         self.user = None
         self.session = None
     

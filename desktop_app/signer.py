@@ -20,7 +20,7 @@ load_dotenv(Path(__file__).with_name(".env"))
 
 
 class CertificateSigner:
-    """Handle digital signing of certificates"""
+    """Handle digital signing and verification of certificates"""
     
     def __init__(
         self,
@@ -29,42 +29,45 @@ class CertificateSigner:
         private_key_pem: Optional[str] = None,
         public_key_pem: Optional[str] = None
     ):
-        # Keep path args for backward compatibility, but prefer environment keys.
         self.private_key_path = Path(private_key_path) if private_key_path else Path("keys/private_key.pem")
         self.public_key_path = Path(public_key_path) if public_key_path else Path("keys/public_key.pem")
         self.private_key_pem = private_key_pem or self._read_env_key("SIGNING_PRIVATE_KEY_PEM")
         self.public_key_pem = public_key_pem or self._read_env_key("SIGNING_PUBLIC_KEY_PEM")
 
-        # Backward-compatible fallback: read legacy key files if env vars are missing.
+        # Fallback: read key files if present
         if not self.private_key_pem and self.private_key_path.exists():
-            with open(self.private_key_path, 'r') as f:
-                self.private_key_pem = f.read()
+            try:
+                with open(self.private_key_path, 'r') as f:
+                    self.private_key_pem = f.read()
+            except Exception:
+                pass
 
         if not self.public_key_pem and self.public_key_path.exists():
-            with open(self.public_key_path, 'r') as f:
-                self.public_key_pem = f.read()
+            try:
+                with open(self.public_key_path, 'r') as f:
+                    self.public_key_pem = f.read()
+            except Exception:
+                pass
 
-        # If neither source exists, generate keys in-memory (do not write folders/files).
-        if not self.private_key_pem or not self.public_key_pem:
-            self.generate_keys()
+        self.has_private_key = bool(self.private_key_pem)
 
     def _read_env_key(self, env_name: str) -> Optional[str]:
         value = os.getenv(env_name)
         if not value:
             return None
-        # Support multi-line PEM represented with escaped newlines in .env.
         return value.replace("\\n", "\n")
     
     def generate_keys(self):
-        """Generate new ECC key pair in memory"""
+        """Generate new ECC key pair in memory (for development/testing setup only)"""
         key = ECC.generate(curve='P-256')
         self.private_key_pem = key.export_key(format='PEM')
         self.public_key_pem = key.public_key().export_key(format='PEM')
+        self.has_private_key = True
     
     def load_private_key(self) -> ECC.EccKey:
         """Load private key from environment or fallback source"""
         if not self.private_key_pem:
-            raise ValueError("SIGNING_PRIVATE_KEY_PEM is not set")
+            raise ValueError("SIGNING_PRIVATE_KEY_PEM is not set. Use server-side signing for production.")
         return ECC.import_key(self.private_key_pem)
     
     def load_public_key(self) -> ECC.EccKey:
@@ -72,7 +75,7 @@ class CertificateSigner:
         if not self.public_key_pem:
             raise ValueError("SIGNING_PUBLIC_KEY_PEM is not set")
         return ECC.import_key(self.public_key_pem)
-    
+
     def generate_certificate_hash(self, cert_data: Dict) -> str:
         # Remove signature if present to avoid circular dependency
         clean_data = {k: v for k, v in cert_data.items() if k != '_signature'}
@@ -84,56 +87,62 @@ class CertificateSigner:
         hash_obj = hashlib.sha256(json_str.encode())
         return hash_obj.hexdigest()
     
-    def sign_certificate(self, cert_data: Dict) -> Dict:
-        # Generate hash
-        cert_hash = self.generate_certificate_hash(cert_data)
+    def sign_certificate_offline(self, cert_data: Dict) -> Dict:
+        """Sign certificate locally (offline mode). Mark clearly as offline signature."""
+        if not self.has_private_key:
+            # Generate a temporary key if offline local signing is requested without an env key
+            self.generate_keys()
         
-        # Load private key
+        cert_hash = self.generate_certificate_hash(cert_data)
         private_key = self.load_private_key()
         
-        # Create signature
         hash_obj = SHA256.new(cert_hash.encode())
         signer = DSS.new(private_key, 'fips-186-3')
         signature = signer.sign(hash_obj)
         
-        # Add signature to certificate
         cert_data['_signature'] = {
             'algorithm': 'ECDSA-SHA256',
             'signature': base64.b64encode(signature).decode(),
             'public_key': self.load_public_key().export_key(format='PEM'),
             'signed_at': datetime.utcnow().isoformat() + 'Z',
-            'verification_hash': cert_hash
+            'verification_hash': cert_hash,
+            'signing_mode': 'offline_local'
         }
         
         return cert_data
+
+    def sign_certificate(self, cert_data: Dict) -> Dict:
+        """Backward-compatible sign method"""
+        return self.sign_certificate_offline(cert_data)
     
-    def verify_signature(self, cert_data: Dict) -> bool:
+    def verify_signature(self, cert_data: Dict, pinned_only: bool = True) -> bool:
+        """Verify certificate signature using pinned public key.
+        
+        Args:
+            cert_data: Certificate dictionary with _signature
+            pinned_only: If True, strictly use the client's pinned public key
+                         rather than trusting the public key embedded in the cert.
+        """
         try:
-            # Extract signature info
             signature_info = cert_data.get('_signature')
             if not signature_info:
                 return False
             
-            # Decode signature
             signature = base64.b64decode(signature_info['signature'])
-            
-            # Get stored hash
             stored_hash = signature_info['verification_hash']
-            
-            # Calculate current hash
             current_hash = self.generate_certificate_hash(cert_data)
             
-            # Check if hash matches
             if stored_hash != current_hash:
                 return False
             
-            # Load public key from signature or file
-            if 'public_key' in signature_info:
+            # Use pinned public key for verification to prevent self-attestation attacks
+            if pinned_only and self.public_key_pem:
+                public_key = self.load_public_key()
+            elif 'public_key' in signature_info:
                 public_key = ECC.import_key(signature_info['public_key'])
             else:
                 public_key = self.load_public_key()
             
-            # Verify signature
             hash_obj = SHA256.new(stored_hash.encode())
             verifier = DSS.new(public_key, 'fips-186-3')
             verifier.verify(hash_obj, signature)

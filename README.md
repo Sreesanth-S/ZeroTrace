@@ -136,6 +136,21 @@ ZeroTrace/
 
 ---
 
+## Desktop Application
+
+<img width="1919" height="1020" alt="Screenshot 2026-08-19 110742" src="https://github.com/user-attachments/assets/87b8b717-6121-461a-9059-2bc5c5e1f24e" />
+
+## Web Portal
+
+**Dashboard Page**
+<img width="1919" height="914" alt="Screenshot 2026-08-19 111335" src="https://github.com/user-attachments/assets/58709c04-a08c-4a6b-85f1-de41756f5025" />
+
+**Verification Page**
+
+<img width="1919" height="911" alt="image" src="https://github.com/user-attachments/assets/700926d5-e35b-43a3-80af-ef50516c1ded" />
+
+---
+
 ## Technologies Used
 
 * **Programming Languages**: Python 3.10+, JavaScript (Node.js ES Modules & React JSX), SQL (PostgreSQL)

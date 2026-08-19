@@ -20,9 +20,6 @@ keys/
 *.key
 public_key.pem
 private_key.pem
-supabase_config/
-**/supabase_config/
-supabase_config/*
 uploads/
 package-lock.json
 yarn.lock

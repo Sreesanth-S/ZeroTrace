@@ -8,6 +8,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def set_supabase_auth_token(client, token: str):
+    """Set bearer authorization token on both PostgREST and Storage sub-clients"""
+    if not client or not token:
+        return
+    try:
+        if hasattr(client, 'postgrest'):
+            client.postgrest.auth(token)
+    except Exception:
+        pass
+    try:
+        if hasattr(client, 'storage') and hasattr(client.storage, '_client'):
+            client.storage._client.headers['authorization'] = f"Bearer {token}"
+    except Exception:
+        pass
+
+
 class SupabaseDesktopClient:
     """Supabase client for desktop application.
     
@@ -38,6 +54,8 @@ class SupabaseDesktopClient:
             
             self.session = response.session
             self.user = response.user
+            if response.session and getattr(response.session, 'access_token', None):
+                set_supabase_auth_token(self.client, response.session.access_token)
             return True
             
         except Exception as e:

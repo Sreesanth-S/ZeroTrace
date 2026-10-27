@@ -477,7 +477,7 @@ except ImportError as e:
 class ZeroTraceMainWindow(QMainWindow):
     """Main window of the ZeroTrace application"""
     
-    def __init__(self, supabase_client=None, user=None):
+    def __init__(self, supabase_client=None, user=None, session=None):
         super().__init__()
         self.setWindowTitle("ZeroTrace - Secure Drive Wiper")
         self.setMinimumSize(900, 700)
@@ -493,16 +493,18 @@ class ZeroTraceMainWindow(QMainWindow):
         # Initialize certificate manager
         self.supabase_client = supabase_client
         self.user = user  # Store the authenticated user
+        self.session = session
         self.certificate_manager = None
         
         if CERT_MANAGER_AVAILABLE:
             try:
                 if self.supabase_client:
-                    self.certificate_manager = CertificateManager(self.supabase_client)
+                    self.certificate_manager = CertificateManager(self.supabase_client, session=self.session)
                     
-                    # Pass the user to certificate manager
+                    # Pass the user and session to certificate manager
                     if self.user:
                         self.certificate_manager.user = self.user
+                        self.certificate_manager.session = self.session
                         logger.info(f"Certificate manager initialized for user: {self.user.email}")
                     else:
                         logger.info("Certificate manager initialized in offline mode")

@@ -37,22 +37,19 @@ router.get('/user', requireAuth, (req, res) => {
 // Get user profile
 router.get('/profile', requireAuth, async (req, res) => {
   try {
-    const { data, error } = await supabaseClient.client
+    const client = supabaseClient.serviceClient || supabaseClient.client;
+    const { data, error } = await client
       .from('user_profiles')
       .select('*')
       .eq('id', req.user.id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Profile fetch error:', error);
       return res.status(500).json({ error: 'Failed to fetch profile' });
     }
 
-    if (data) {
-      res.json({ profile: data });
-    } else {
-      res.status(404).json({ profile: null });
-    }
+    res.json({ profile: data || null });
   } catch (error) {
     console.error('Profile fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch profile' });
@@ -62,7 +59,7 @@ router.get('/profile', requireAuth, async (req, res) => {
 // Update user profile
 router.put('/profile', requireAuth, async (req, res) => {
   try {
-    const allowedFields = ['full_name', 'organization', 'phone'];
+    const allowedFields = ['full_name', 'organization', 'phone', 'pin_hash'];
     const updateData = {};
 
     allowedFields.forEach(field => {
@@ -75,12 +72,13 @@ router.put('/profile', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
 
-    const { data, error } = await supabaseClient.client
+    const client = supabaseClient.serviceClient || supabaseClient.client;
+    const { data, error } = await client
       .from('user_profiles')
       .upsert({
         id: req.user.id,
         ...updateData
-      })
+      }, { onConflict: 'id' })
       .select();
 
     if (error) {

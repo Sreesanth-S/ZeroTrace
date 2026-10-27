@@ -185,13 +185,13 @@ class SupabaseClient {
       if (authError) throw authError;
 
       if (authData.user) {
-        // Create user profile
+        // Create or update user profile safely
         const { error: profileError } = await this.serviceClient
           .from('user_profiles')
-          .insert({
+          .upsert({
             id: authData.user.id,
             full_name: fullName
-          });
+          }, { onConflict: 'id' });
 
         if (profileError) {
           console.error('Profile creation error:', profileError);

@@ -152,6 +152,32 @@ CREATE POLICY "Service role can delete any certificate file"
         (select auth.jwt())->>'role' = 'service_role'
     );
 
+-- Authenticated users can manage only files in their own certificate folder
+CREATE POLICY "Authenticated users can upload own certificates"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'certificates' AND
+        (storage.foldername(name))[1] = (select auth.uid()::text)
+    );
+
+CREATE POLICY "Authenticated users can view own certificates"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (
+        bucket_id = 'certificates' AND
+        (storage.foldername(name))[1] = (select auth.uid()::text)
+    );
+
+CREATE POLICY "Authenticated users can update own certificates"
+    ON storage.objects FOR UPDATE TO authenticated
+    USING (
+        bucket_id = 'certificates' AND
+        (storage.foldername(name))[1] = (select auth.uid()::text)
+    )
+    WITH CHECK (
+        bucket_id = 'certificates' AND
+        (storage.foldername(name))[1] = (select auth.uid()::text)
+    );
+
 
 -- ========================================
 -- VERIFICATION LOGS - RLS Policies

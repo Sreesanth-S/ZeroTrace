@@ -4,6 +4,7 @@ from typing import Dict, Optional, Tuple, List
 from signer import CertificateSigner, generate_cert_id
 from pdf_generator import PDFCertificateGenerator
 from supabase import create_client, Client
+from supabase_client import set_supabase_auth_token
 from dotenv import load_dotenv
 from logger import logger
 import os
@@ -19,12 +20,13 @@ load_dotenv()
 class CertificateManager:
     """Manage certificate lifecycle in desktop application"""
     
-    def __init__(self, supabase_client):
+    def __init__(self, supabase_client, session=None):
         """
         Initialize certificate manager
         
         Args:
             supabase_client: Initialized Supabase client (SupabaseDesktopClient or Client)
+            session: User session object containing access_token
         """
         # Get the underlying client if it's wrapped
         if hasattr(supabase_client, 'client'):
@@ -34,6 +36,7 @@ class CertificateManager:
             self.supabase = supabase_client
             self.supabase_wrapper = supabase_client
         
+        self.session = session or getattr(supabase_client, 'session', None)
         self.signer = CertificateSigner()
         self.pdf_generator = PDFCertificateGenerator()
         
@@ -58,90 +61,74 @@ class CertificateManager:
             session = None
             if hasattr(self.supabase_wrapper, 'session') and self.supabase_wrapper.session:
                 session = self.supabase_wrapper.session
+            elif hasattr(self.supabase, 'auth'):
+                session = self.supabase.auth.get_session()
             
-            if not session or not getattr(session, 'access_token', None):
+            token = session.access_token if session else None
+            if not token:
+                logger.info("No active auth token; proceeding with local offline signing")
                 return None
             
-            backend_url = os.getenv('BACKEND_URL', 'http://localhost:5000') + '/api/certificates/sign'
-            payload = json.dumps({'cert_data': cert_data}).encode('utf-8')
+            backend_url = os.getenv('BACKEND_URL', 'http://localhost:5000')
+            url = f"{backend_url}/api/certificates/sign"
             
+            payload = json.dumps({"cert_data": cert_data}).encode('utf-8')
             req = urllib.request.Request(
-                backend_url,
+                url,
                 data=payload,
                 headers={
                     'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {session.access_token}'
+                    'Authorization': f'Bearer {token}'
                 },
                 method='POST'
             )
             
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode('utf-8'))
-                    if data.get('success') and data.get('signed_cert'):
-                        logger.info(f"Certificate {cert_data.get('cert_id')} successfully signed by backend server.")
-                        return data['signed_cert']
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    resp_data = json.loads(response.read().decode('utf-8'))
+                    if resp_data.get('success') and resp_data.get('signed_cert'):
+                        logger.info("Successfully obtained server-side signature")
+                        return resp_data['signed_cert']
+            return None
         except Exception as e:
-            logger.warning(f"Server signing request skipped/failed ({e}), falling back to offline local signing.")
-        
-        return None
+            logger.warning(f"Server-side signing request failed/bypassed: {e}")
+            return None
     
     def create_certificate_data(self, wipe_result: Dict) -> Dict:
-        """
-        Create certificate data structure from wipe result
+        """Create certificate JSON data structure matching schema requirements"""
+        cert_id = generate_cert_id(
+            wipe_result.get('device_id', 'UNKNOWN'),
+            wipe_result.get('start_time', datetime.utcnow().isoformat())
+        )
         
-        Args:
-            wipe_result: Result from wipe operation
-            
-        Returns:
-            Certificate data dictionary
-        """
-        # Generate certificate ID
-        device_id = wipe_result.get('device_id', 'unknown')
-        cert_id = generate_cert_id(device_id)
+        user_id = self.user.id if self.user else "local"
+        user_email = self.user.email if self.user else "offline"
         
-        # Get user info
-        user_id = 'local'
-        user_email = 'offline'
-        
-        if self.user:
-            user_id = self.user.id
-            user_email = self.user.email if hasattr(self.user, 'email') else 'unknown'
-        
-        # Get compliance standard mapping
-        compliance = wipe_result.get('compliance')
-        if not compliance:
-            from wipe_engine import get_compliance_info
-            compliance = get_compliance_info(wipe_result.get('method', ''))
-
-        # Build certificate data
         cert_data = {
-            'cert_id': cert_id,
-            'version': '1.0',
-            'generated_at': datetime.utcnow().isoformat() + 'Z',
-            'device_id': device_id,
-            'device': wipe_result.get('device_name', 'Unknown Device'),
-            'device_info': {
-                'model': wipe_result.get('model', 'N/A'),
-                'serial': wipe_result.get('serial', 'N/A'),
-                'capacity': wipe_result.get('capacity', 'N/A'),
-                'type': wipe_result.get('device_type', 'Unknown')
+            "cert_id": cert_id,
+            "version": "1.0",
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "device_id": wipe_result.get('device_id', ''),
+            "device": wipe_result.get('device_name', ''),
+            "device_info": {
+                "model": wipe_result.get('device_model', ''),
+                "serial": wipe_result.get('device_serial', ''),
+                "capacity": wipe_result.get('device_capacity', ''),
+                "type": wipe_result.get('device_type', '')
             },
-            'method_used': wipe_result.get('method', 'DoD_3Pass'),
-            'compliance': compliance,
-            'passes_completed': wipe_result.get('passes', 3),
-            'start': wipe_result.get('start_time', datetime.utcnow().isoformat()),
-            'end': wipe_result.get('end_time', datetime.utcnow().isoformat()),
-            'status': wipe_result.get('status', 'Completed'),
-            'verification': {
-                'completion_hash': wipe_result.get('completion_hash', ''),
-                'method': wipe_result.get('verification', {}).get('verification_method', 'SHA-256'),
-                'sample_count': wipe_result.get('verification', {}).get('sample_count', 0),
-                'Verified': True
+            "method_used": wipe_result.get('wipe_method', ''),
+            "passes_completed": wipe_result.get('passes_completed', 1),
+            "start": wipe_result.get('start_time', ''),
+            "end": wipe_result.get('end_time', ''),
+            "status": "Completed" if wipe_result.get('success') else "Failed",
+            "verification": {
+                "completion_hash": wipe_result.get('verification_hash', ''),
+                "method": "SHA-256",
+                "verified": wipe_result.get('success', False)
             },
-            'operator': {
-                'user_id': user_id,
-                'email': user_email
+            "operator": {
+                "user_id": user_id,
+                "email": user_email
             }
         }
         
@@ -201,8 +188,25 @@ class CertificateManager:
             logger.error("Supabase client not available")
             return False
         
+        # Ensure bearer token is set on both postgrest and storage clients
+        token = None
+        if getattr(self, 'session', None) and getattr(self.session, 'access_token', None):
+            token = self.session.access_token
+        elif hasattr(self, 'supabase_wrapper') and getattr(self.supabase_wrapper, 'session', None):
+            token = self.supabase_wrapper.session.access_token
+        elif hasattr(self.supabase, 'auth'):
+            try:
+                sess = self.supabase.auth.get_session()
+                if sess and getattr(sess, 'access_token', None):
+                    token = sess.access_token
+            except Exception:
+                pass
+
+        if token:
+            set_supabase_auth_token(self.supabase, token)
+
         try:
-            uploader = SupabaseCertificateUploader(self.supabase)
+            uploader = SupabaseCertificateUploader(self.supabase, session=self.session)
             res = uploader.upload_complete_certificate(
                 user_id=self.user.id,
                 cert_id=cert_data['cert_id'],
@@ -211,6 +215,8 @@ class CertificateManager:
                 cert_data=cert_data,
                 wipe_data=wipe_data
             )
+            if not res.get('success'):
+                logger.error(f"Certificate upload failed for {cert_data.get('cert_id')}: {res.get('message')}")
             return res.get('success', False)
         except Exception as e:
             logger.error(f"Certificate upload failed: {e}")
@@ -248,20 +254,45 @@ class CertificateManager:
     def sync_local_certificates(self) -> Dict:
         """Sync all local certificates to Supabase"""
         if not self.user or not self.supabase:
-            return {'success': False, 'message': 'User not logged in or Supabase client unavailable', 'synced': 0, 'failed': 0}
+            return {'success': False, 'message': 'User not logged in or Supabase client unavailable', 'synced': 0, 'failed': 0, 'skipped': 0, 'total': 0}
+
+        # Refresh auth token on postgrest and storage sub-clients using session
+        token = None
+        if getattr(self, 'session', None) and getattr(self.session, 'access_token', None):
+            token = self.session.access_token
+        elif hasattr(self, 'supabase_wrapper') and getattr(self.supabase_wrapper, 'session', None):
+            token = self.supabase_wrapper.session.access_token
+        elif hasattr(self.supabase, 'auth'):
+            try:
+                sess = self.supabase.auth.get_session()
+                if sess and getattr(sess, 'access_token', None):
+                    token = sess.access_token
+            except Exception as auth_err:
+                logger.warning(f"Notice: Could not set auth token during sync: {auth_err}")
+
+        if token:
+            set_supabase_auth_token(self.supabase, token)
 
         local_certs = self.get_local_certificates()
         synced, failed, skipped = 0, 0, 0
 
         for json_path in local_certs:
             try:
-                with open(json_path, 'r') as f:
+                with open(json_path, 'r', encoding='utf-8') as f:
                     cert_data = json.load(f)
                 
                 cert_id = cert_data.get('cert_id')
                 pdf_path = json_path.with_suffix('.pdf')
                 if not cert_id or not pdf_path.exists():
                     failed += 1
+                    continue
+
+                uploader = SupabaseCertificateUploader(self.supabase)
+                # Check if certificate already exists in database
+                exists, existing_record = uploader.verify_certificate_exists(cert_id)
+                if exists:
+                    skipped += 1
+                    logger.info(f"Skipping certificate {cert_id}: already uploaded")
                     continue
 
                 if self.upload_certificate(json_path, pdf_path, cert_data):
@@ -277,7 +308,7 @@ class CertificateManager:
 class SupabaseCertificateUploader:
     """Handle certificate uploads to Supabase"""
     
-    def __init__(self, supabase_client: Client = None):
+    def __init__(self, supabase_client: Client = None, session=None):
         if supabase_client:
             self.client = supabase_client
         else:
@@ -289,47 +320,105 @@ class SupabaseCertificateUploader:
             
             self.client = create_client(url, key)
         
+        self.session = session
         self.bucket_name = 'certificates'
     
+    def _upload_via_backend(self, cert_id: str, json_path: Path, pdf_path: Path, token: str) -> Tuple[bool, str, Optional[Dict]]:
+        try:
+            import base64
+            import urllib.request
+            backend_url = os.getenv('BACKEND_URL', 'http://localhost:5000')
+            url = f"{backend_url}/api/certificates/upload"
+            
+            with open(json_path, 'r', encoding='utf-8') as f:
+                json_content = json.load(f)
+            
+            with open(pdf_path, 'rb') as f:
+                pdf_base64 = base64.b64encode(f.read()).decode('utf-8')
+            
+            payload = json.dumps({
+                "cert_id": cert_id,
+                "json_content": json_content,
+                "pdf_base64": pdf_base64
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {token}'
+                },
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status in (200, 201):
+                    data = json.loads(resp.read().decode('utf-8'))
+                    if data.get('success') and data.get('urls'):
+                        return True, "Files uploaded successfully via backend", data['urls']
+            return False, "Backend storage upload failed", None
+        except Exception as e:
+            return False, f"Backend upload error: {e}", None
+
     def upload_certificate_files(self, user_id: str, cert_id: str, 
                                   json_path: Path, pdf_path: Path) -> Tuple[bool, str, Optional[Dict]]:
+        # Verify files exist
+        if not json_path.exists():
+            return False, f"JSON file not found: {json_path}", None
+        
+        if not pdf_path.exists():
+            return False, f"PDF file not found: {pdf_path}", None
+
+        token = None
+        if getattr(self, 'session', None) and getattr(self.session, 'access_token', None):
+            token = self.session.access_token
+        elif hasattr(self.client, 'auth'):
+            try:
+                sess = self.client.auth.get_session()
+                if sess and getattr(sess, 'access_token', None):
+                    token = sess.access_token
+            except Exception:
+                pass
+
+        if token:
+            set_supabase_auth_token(self.client, token)
+
         try:
-            # Verify files exist
-            if not json_path.exists():
-                return False, f"JSON file not found: {json_path}", None
-            
-            if not pdf_path.exists():
-                return False, f"PDF file not found: {pdf_path}", None
-            
-            # Upload JSON file
+            # Step A: Attempt direct client storage upload
             json_remote_path = f"{user_id}/{cert_id}.json"
+            pdf_remote_path = f"{user_id}/{cert_id}.pdf"
             
             with open(json_path, 'rb') as f:
                 json_data = f.read()
-            
-            json_response = self.client.storage.from_(self.bucket_name).upload(
-                path=json_remote_path,
-                file=json_data,
-                file_options={
-                    "content-type": "application/json",
-                    "upsert": "true"  # Overwrite if exists
-                }
-            )
-            
-            # Upload PDF file
-            pdf_remote_path = f"{user_id}/{cert_id}.pdf"
-            
             with open(pdf_path, 'rb') as f:
                 pdf_data = f.read()
             
-            pdf_response = self.client.storage.from_(self.bucket_name).upload(
+            self.client.storage.from_(self.bucket_name).upload(
+                path=json_remote_path,
+                file=json_data,
+                file_options={"content-type": "application/json", "upsert": "true"}
+            )
+            
+            self.client.storage.from_(self.bucket_name).upload(
                 path=pdf_remote_path,
                 file=pdf_data,
-                file_options={
-                    "content-type": "application/pdf",
-                    "upsert": "true"
-                }
+                file_options={"content-type": "application/pdf", "upsert": "true"}
             )
+            
+            json_url = self.client.storage.from_(self.bucket_name).get_public_url(json_remote_path)
+            pdf_url = self.client.storage.from_(self.bucket_name).get_public_url(pdf_remote_path)
+            
+            return True, "Files uploaded successfully", {'json_url': json_url, 'pdf_url': pdf_url}
+            
+        except Exception as e:
+            # Step B: Fallback to backend upload if client storage upload is restricted by RLS
+            if token:
+                logger.info(f"Direct storage upload notice ({e}), falling back to backend upload service...")
+                success, msg, urls = self._upload_via_backend(cert_id, json_path, pdf_path, token)
+                if success:
+                    return True, msg, urls
+            return False, f"Upload failed: {str(e)}", None
             
             # Get public URLs
             json_url = self.client.storage.from_(self.bucket_name).get_public_url(json_remote_path)
@@ -345,24 +434,38 @@ class SupabaseCertificateUploader:
         except Exception as e:
             return False, f"Upload failed: {str(e)}", None
     
-    def insert_certificate_record(self, cert_data: Dict, json_url: str, pdf_url: str) -> Tuple[bool, str, Optional[str]]:
+    def insert_certificate_record(self, cert_data: Dict, json_url: str, pdf_url: str, target_user_id: str = None) -> Tuple[bool, str, Optional[str]]:
         try:
-            # Extract user_id from operator info or use current user
-            user_id = cert_data.get('operator', {}).get('user_id')
+            # Extract user_id from explicit arg, operator info, or session
+            user_id = target_user_id or cert_data.get('operator', {}).get('user_id')
             if not user_id or user_id == 'local':
-                # Get current authenticated user
-                user = self.client.auth.get_user()
-                if user and hasattr(user, 'user') and user.user:
-                    user_id = user.user.id
-                else:
-                    return False, "No authenticated user", None
+                if hasattr(self.client, 'auth'):
+                    sess = self.client.auth.get_session()
+                    if sess and getattr(sess, 'user', None):
+                        user_id = sess.user.id
+                    else:
+                        user = self.client.auth.get_user()
+                        if user and hasattr(user, 'user') and user.user:
+                            user_id = user.user.id
+            
+            if not user_id or user_id == 'local':
+                return False, "No authenticated user ID available for certificate record", None
+
+            # Refresh postgrest token
+            if hasattr(self.client, 'auth'):
+                try:
+                    sess = self.client.auth.get_session()
+                    if sess and getattr(sess, 'access_token', None):
+                        set_supabase_auth_token(self.client, sess.access_token)
+                except Exception:
+                    pass
             
             # Prepare record for database
             record = {
                 'user_id': user_id,
                 'device_id': cert_data.get('device_id', 'unknown'),
                 'cert_id': cert_data.get('cert_id'),
-                'device_name': cert_data.get('device'),
+                'device_name': cert_data.get('device') or cert_data.get('device_name'),
                 'device_model': cert_data.get('device_info', {}).get('model'),
                 'device_serial': cert_data.get('device_info', {}).get('serial'),
                 'wipe_method': cert_data.get('method_used'),
@@ -375,30 +478,39 @@ class SupabaseCertificateUploader:
                 'pdf_url': pdf_url
             }
             
-            # Insert into database
-            response = self.client.table('certificates').insert(record).execute()
+            # Use upsert with on_conflict on cert_id to handle duplicates gracefully
+            response = self.client.table('certificates').upsert(record, on_conflict='cert_id').execute()
             
             if response.data and len(response.data) > 0:
                 record_id = response.data[0]['id']
                 return True, "Certificate record created", record_id
             else:
-                return False, "No data returned from insert", None
+                return True, "Certificate record upserted", None
                 
         except Exception as e:
             return False, f"Database insert failed: {str(e)}", None
     
     def insert_wipe_log(self, certificate_id: str, wipe_data: Dict) -> Tuple[bool, str]:
         try:
-            # Calculate duration in seconds
-            start_time = datetime.fromisoformat(wipe_data.get('start_time', '').replace('Z', '+00:00'))
-            end_time = datetime.fromisoformat(wipe_data.get('end_time', '').replace('Z', '+00:00'))
-            duration_seconds = int((end_time - start_time).total_seconds())
+            start_str = wipe_data.get('start_time') or wipe_data.get('start') or ''
+            end_str = wipe_data.get('end_time') or wipe_data.get('end') or ''
             
+            duration_seconds = 0
+            if start_str and end_str:
+                try:
+                    s_clean = str(start_str).replace('Z', '+00:00')
+                    e_clean = str(end_str).replace('Z', '+00:00')
+                    start_time = datetime.fromisoformat(s_clean)
+                    end_time = datetime.fromisoformat(e_clean)
+                    duration_seconds = max(0, int((end_time - start_time).total_seconds()))
+                except Exception:
+                    pass
+
             log_record = {
                 'certificate_id': certificate_id,
-                'device_id': wipe_data.get('device_id'),
-                'wipe_passes': wipe_data.get('passes_completed', 1),
-                'bytes_wiped': wipe_data.get('device_size', 0),
+                'device_id': wipe_data.get('device_id', 'unknown'),
+                'wipe_passes': wipe_data.get('passes_completed') or wipe_data.get('passes') or 1,
+                'bytes_wiped': wipe_data.get('bytes_wiped') or wipe_data.get('device_size', 0),
                 'duration_seconds': duration_seconds,
                 'errors': wipe_data.get('error', None)
             }
@@ -439,7 +551,7 @@ class SupabaseCertificateUploader:
             
             # Step 2: Insert certificate record
             record_success, record_msg, record_id = self.insert_certificate_record(
-                cert_data, urls['json_url'], urls['pdf_url']
+                cert_data, urls['json_url'], urls['pdf_url'], target_user_id=user_id
             )
             
             if not record_success:

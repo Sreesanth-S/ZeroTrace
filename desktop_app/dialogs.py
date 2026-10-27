@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (QDialog, QLabel, QVBoxLayout, QLineEdit, QMessageBo
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QFont
 from supabase import create_client, Client
+from supabase_client import set_supabase_auth_token
 from dotenv import load_dotenv
 import os
 import bcrypt
@@ -221,8 +222,23 @@ class LoginDialog(QDialog):
                 self.user = response.user
                 self.session = response.session
                 
-                # IMPORTANT: Set the session on the client for RLS
+                # IMPORTANT: Set session and bearer token on both postgrest and storage clients
                 self.supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                set_supabase_auth_token(self.supabase, response.session.access_token)
+                
+                # Automatically ensure user_profiles row exists for this user
+                try:
+                    profile_check = self.supabase.table('user_profiles').select('id').eq('id', response.user.id).execute()
+                    if not profile_check.data:
+                        user_meta = getattr(response.user, 'user_metadata', {}) or {}
+                        full_name = user_meta.get('full_name') or user_meta.get('name') or email.split('@')[0]
+                        self.supabase.table('user_profiles').upsert({
+                            'id': response.user.id,
+                            'full_name': full_name
+                        }, on_conflict='id').execute()
+                        print(f"Automatically created profile for user: {response.user.id}")
+                except Exception as profile_err:
+                    print(f"Auto profile creation check notice: {profile_err}")
                 
                 # Save email if remember me is checked
                 if self.remember_me.isChecked():
@@ -667,74 +683,53 @@ class PinDialog(QDialog):
         try:
             pin_hash = bcrypt.hashpw(pin.encode('utf-8'), bcrypt.gensalt())
             pin_hash_str = pin_hash.decode('utf-8')
-            
+
             print(f"Attempting to save PIN for user: {self.user_id}")
-            
-            # Method 1: Try direct update
-            try:
-                response = self.supabase.table('user_profiles').update({
-                    'pin_hash': pin_hash_str
-                }).eq('id', self.user_id).execute()
-                
-                print(f"Update response: {response}")
-                
-            except Exception as update_err:
-                print(f"Update failed: {update_err}")
-            
-            # Method 2: Verify it was saved by reading it back
-            try:
-                verify = self.supabase.table('user_profiles')\
-                    .select('id, pin_hash')\
-                    .eq('id', self.user_id)\
-                    .execute()
-                
-                print(f"Verify response: {verify.data}")
-                
-                if verify.data and len(verify.data) > 0:
-                    saved_hash = verify.data[0].get('pin_hash')
-                    if saved_hash:
-                        # Verify the hash matches what we just saved
-                        if bcrypt.checkpw(pin.encode('utf-8'), saved_hash.encode('utf-8')):
-                            print(f"✓ PIN successfully saved and verified!")
-                            return True
-                        else:
-                            print(f"⚠ Hash mismatch after save")
-                    else:
-                        print(f"⚠ pin_hash is NULL in database")
-                else:
-                    print(f"⚠ No profile row exists for user {self.user_id}")
-                    
-                    # Try to create the profile row
-                    print(f"Attempting to create profile row...")
-                    try:
-                        create_response = self.supabase.table('user_profiles').insert({
-                            'id': self.user_id,
-                            'pin_hash': pin_hash_str
-                        }).execute()
-                        
-                        print(f"Create response: {create_response}")
-                        
-                        if create_response.data:
-                            print(f"✓ Profile created with PIN!")
-                            return True
-                            
-                    except Exception as create_err:
-                        print(f"Create failed: {create_err}")
-                        
-            except Exception as verify_err:
-                print(f"Verify failed: {verify_err}")
-            
+
+            if self.supabase and hasattr(self.supabase, 'auth'):
+                try:
+                    sess = self.supabase.auth.get_session()
+                    if sess and getattr(sess, 'access_token', None):
+                        self.supabase.postgrest.auth(sess.access_token)
+                except Exception as auth_err:
+                    print(f"Warning: Could not set postgrest auth token: {auth_err}")
+
+            response = self.supabase.table('user_profiles').upsert({
+                'id': self.user_id,
+                'pin_hash': pin_hash_str
+            }, on_conflict='id').execute()
+            print(f"PIN upsert response: {response}")
+
+            verify = self.supabase.table('user_profiles')\
+                .select('pin_hash')\
+                .eq('id', self.user_id)\
+                .single()\
+                .execute()
+            saved_hash = (verify.data or {}).get('pin_hash')
+            if saved_hash and bcrypt.checkpw(pin.encode('utf-8'), saved_hash.encode('utf-8')):
+                print("PIN successfully saved and verified")
+                return True
+
+            print("PIN save verification failed")
             return False
-            
+
         except Exception as e:
             print(f"✗ PIN save completely failed: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
+
     def verify_pin_from_supabase(self, pin: str) -> bool:
         """Verify PIN against Supabase stored hash"""
         try:
+            if self.supabase and hasattr(self.supabase, 'auth'):
+                try:
+                    sess = self.supabase.auth.get_session()
+                    if sess and getattr(sess, 'access_token', None):
+                        self.supabase.postgrest.auth(sess.access_token)
+                except Exception as auth_err:
+                    print(f"Warning: Could not set postgrest auth token: {auth_err}")
+
             response = self.supabase.table('user_profiles')\
                 .select('pin_hash')\
                 .eq('id', self.user_id)\

@@ -77,6 +77,7 @@ class ZeroTraceApplication(QApplication):
         
         # Get user from login
         self.user = login_dialog.user
+        self.session = login_dialog.session
         self.supabase_client = login_dialog.supabase
         
         # Check if PIN is required
@@ -122,6 +123,12 @@ class ZeroTraceApplication(QApplication):
         
         try:
             from logger import logger
+            from supabase_client import set_supabase_auth_token
+            if hasattr(self.supabase_client, 'auth'):
+                sess = self.session or self.supabase_client.auth.get_session()
+                if sess and getattr(sess, 'access_token', None):
+                    set_supabase_auth_token(self.supabase_client, sess.access_token)
+
             response = self.supabase_client.table('user_profiles')\
                 .select('id, pin_hash')\
                 .eq('id', user_id)\
@@ -146,11 +153,12 @@ class ZeroTraceApplication(QApplication):
         if not self.authenticate_user():
             return 1
         
-        # Create main window and pass both client and user
+        # Create main window and pass client, user, and session
         from main_window import ZeroTraceMainWindow
         self.main_window = ZeroTraceMainWindow(
             supabase_client=self.supabase_client,
-            user=self.user  # Pass the authenticated user
+            user=self.user,
+            session=self.session
         )
         self.main_window.show()
         

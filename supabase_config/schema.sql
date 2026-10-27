@@ -33,9 +33,31 @@ CREATE TABLE user_profiles (
     full_name TEXT,
     organization TEXT,
     phone TEXT,
+    pin_hash TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure every authenticated user has a profile before the desktop app saves a PIN.
+CREATE OR REPLACE FUNCTION handle_new_user_profile()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.user_profiles (id, full_name)
+    VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'full_name', ''))
+    ON CONFLICT (id) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION handle_new_user_profile();
 
 -- Wipe Logs Table (for detailed tracking)
 CREATE TABLE wipe_logs (

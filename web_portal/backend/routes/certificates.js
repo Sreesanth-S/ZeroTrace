@@ -5,6 +5,51 @@ import supabaseClient from '../lib/supabaseClient.js';
 
 const router = express.Router();
 
+// Upload certificate files (JSON and PDF) to Supabase Storage via backend
+router.post('/upload', requireAuth, async (req, res) => {
+  try {
+    const { cert_id, json_content, pdf_base64 } = req.body;
+    if (!cert_id || !json_content || !pdf_base64) {
+      return res.status(400).json({ error: 'cert_id, json_content, and pdf_base64 are required' });
+    }
+
+    const userId = req.user.id;
+    const bucket = 'certificates';
+    const jsonPath = `${userId}/${cert_id}.json`;
+    const pdfPath = `${userId}/${cert_id}.pdf`;
+
+    const client = supabaseClient.serviceClient || supabaseClient.client;
+
+    // Upload JSON file
+    const jsonBuffer = Buffer.from(typeof json_content === 'string' ? json_content : JSON.stringify(json_content));
+    const { error: jsonErr } = await client.storage
+      .from(bucket)
+      .upload(jsonPath, jsonBuffer, { contentType: 'application/json', upsert: true });
+
+    if (jsonErr) throw jsonErr;
+
+    // Upload PDF file
+    const pdfBuffer = Buffer.from(pdf_base64, 'base64');
+    const { error: pdfErr } = await client.storage
+      .from(bucket)
+      .upload(pdfPath, pdfBuffer, { contentType: 'application/pdf', upsert: true });
+
+    if (pdfErr) throw pdfErr;
+
+    const json_url = client.storage.from(bucket).getPublicUrl(jsonPath).data.publicUrl;
+    const pdf_url = client.storage.from(bucket).getPublicUrl(pdfPath).data.publicUrl;
+
+    res.json({
+      success: true,
+      message: 'Files uploaded successfully',
+      urls: { json_url, pdf_url }
+    });
+  } catch (error) {
+    console.error('Certificate storage upload error:', error);
+    res.status(500).json({ error: 'Storage upload failed', details: error.message });
+  }
+});
+
 // Create/register a new certificate
 router.post('/', requireAuth, async (req, res) => {
   try {

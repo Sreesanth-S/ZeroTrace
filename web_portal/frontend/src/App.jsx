@@ -250,12 +250,18 @@ function RegisterPage({ setView }) {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setSuccess("");
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match.");
+      return;
+    }
+    if (formData.password.length < 6) {
+      setError("Password must be at least 6 characters long.");
       return;
     }
     setIsLoading(true);
@@ -267,8 +273,10 @@ function RegisterPage({ setView }) {
       });
       if (signUpError) throw signUpError;
 
-      if (data.user && !data.session) {
-        setView("login");
+      if (data.session) {
+        setSuccess("Account created successfully!");
+      } else if (data.user) {
+        setSuccess("Account created! Please check your email for the verification link, then log in.");
       }
     } catch (err) {
       setError(err.message || "Registration failed.");
@@ -279,13 +287,12 @@ function RegisterPage({ setView }) {
 
   return (
     <PrimaryCard className="form-card">
-      <ActionButton className="top-pill" type="button" onClick={() => setView("login")}>
-        Create account
-      </ActionButton>
+      <h2 className="screen-title">Create Account</h2>
+      {success && <p className="success-line">{success}</p>}
       {error && <p className="error-line">{error}</p>}
       <form className="form-stack" onSubmit={handleSubmit}>
         <Field
-          label="Username"
+          label="Full Name"
           value={formData.fullName}
           onChange={(event) => setFormData((prev) => ({ ...prev, fullName: event.target.value }))}
         />
@@ -313,6 +320,9 @@ function RegisterPage({ setView }) {
           {isLoading ? "Creating..." : "Done"}
         </ActionButton>
       </form>
+      <button className="text-link" type="button" onClick={() => setView("login")}>
+        Back to Login
+      </button>
     </PrimaryCard>
   );
 }

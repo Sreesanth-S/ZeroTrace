@@ -1,32 +1,30 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "./lib/supabase";
+import { api, authStorage, API_URL } from "./lib/api";
 
-const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+const apiUrl = API_URL;
 
 // ---------------------------------------------------------------------------
-// Custom Auth Hook
+// Custom Auth Hook (Backend Authoritative Session)
 // ---------------------------------------------------------------------------
 function useAuth() {
-  const [user, setUser] = useState(null);
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(() => authStorage.getUser());
+  const [session, setSession] = useState(() => {
+    const token = authStorage.getToken();
+    const u = authStorage.getUser();
+    return token ? { access_token: token, user: u } : null;
+  });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      setLoading(false);
-    });
+    const handleAuthChange = () => {
+      const token = authStorage.getToken();
+      const u = authStorage.getUser();
+      setUser(u);
+      setSession(token ? { access_token: token, user: u } : null);
+    };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    window.addEventListener("zerotrace-auth-change", handleAuthChange);
+    return () => window.removeEventListener("zerotrace-auth-change", handleAuthChange);
   }, []);
 
   return { user, session, loading };
@@ -1043,10 +1041,7 @@ function ProfileScreen({ user, session, onLogout }) {
         body: JSON.stringify({ full_name: cleanName }),
       });
 
-      // 2. Update Supabase Auth user metadata
-      await supabase.auth.updateUser({
-        data: { full_name: cleanName },
-      });
+
 
       if (response.ok) {
         setMessage("Name updated successfully!");
@@ -1250,8 +1245,7 @@ function LoginPage({ setView }) {
     setIsLoading(true);
 
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
-      if (authError) throw authError;
+      await api.login(email, password);
       setView("dashboard");
     } catch (err) {
       setError(err.message || "Login failed. Verify credentials.");
@@ -1363,18 +1357,13 @@ function RegisterPage({ setView }) {
 
     setIsLoading(true);
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: fullName } },
-      });
-      if (signUpError) throw signUpError;
-
-      if (data.session) {
+      const data = await api.register(email, password, fullName);
+      if (data.access_token) {
         setSuccess("Account registered successfully! Redirecting...");
         setTimeout(() => setView("dashboard"), 1200);
       } else {
-        setSuccess("Account created! Check your email for verification before signing in.");
+        setSuccess("Account created successfully! Please sign in.");
+        setTimeout(() => setView("login"), 1500);
       }
     } catch (err) {
       setError(err.message || "Registration failed.");
@@ -1497,10 +1486,7 @@ function ForgotPasswordPage({ setView }) {
     setIsLoading(true);
 
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/#type=recovery`,
-      });
-      if (resetError) throw resetError;
+      await api.forgotPassword(email);
       setMessage("Password recovery email sent. Please check your inbox.");
     } catch (err) {
       setError(err.message || "Failed to send reset link.");
@@ -1588,8 +1574,7 @@ function PasswordUpdatePage({ setView }) {
 
     setIsLoading(true);
     try {
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
+      await api.resetPassword(password);
       setMessage("Password updated successfully! You can now log in.");
       setTimeout(() => setView("login"), 1500);
     } catch (err) {
@@ -1687,7 +1672,7 @@ export default function App() {
   }, [isAuthenticated, isRecovery, view]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await api.logout();
     setView("home");
   };
 

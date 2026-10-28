@@ -1,18 +1,23 @@
-import { createClient } from '@supabase/supabase-js';
+// ============================================================================
+// Deprecated compatibility shim.
+// All operations have been migrated to the authoritative FastAPI backend client (api.js).
+// No Supabase URL or Anon Key is required.
+// ============================================================================
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+import { api, authStorage } from './api';
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing Supabase environment variables');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
-
-export const getCurrentUser = async () => {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  return user;
+export const supabase = {
+  auth: {
+    signInWithPassword: ({ email, password }) => api.login(email, password),
+    signUp: ({ email, password, options }) => api.register(email, password, options?.data?.full_name),
+    signOut: () => api.logout(),
+    getUser: async () => ({ data: { user: authStorage.getUser() }, error: null }),
+    getSession: async () => {
+      const token = authStorage.getToken();
+      const user = authStorage.getUser();
+      return { data: { session: token ? { access_token: token, user } : null }, error: null };
+    },
+  },
 };
 
-export { supabaseKey };
+export default supabase;

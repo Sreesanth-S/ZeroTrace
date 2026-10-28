@@ -384,5 +384,39 @@ class SupabaseService:
                 raise Exception("Session expired or refresh token invalid")
             return resp.json()
 
+    async def auth_recover_password(self, email: str) -> Dict[str, Any]:
+        """Trigger password recovery email via Supabase Auth REST endpoint."""
+        if settings.ENVIRONMENT == "testing":
+            return {"success": True, "message": "Password recovery email sent."}
+
+        url = f"{self.base_url}/auth/v1/recover"
+        headers = {"apikey": settings.SUPABASE_KEY, "Content-Type": "application/json"}
+        payload = {"email": email}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code not in (200, 201):
+                err = resp.json().get("error_description") or resp.json().get("msg") or "Failed to send recovery email"
+                raise Exception(err)
+            return {"success": True, "message": "Password recovery email sent."}
+
+    async def auth_update_password(self, token: str, new_password: str) -> Dict[str, Any]:
+        """Update authenticated user password via Supabase Auth REST endpoint."""
+        if settings.ENVIRONMENT == "testing":
+            return {"success": True, "message": "Password updated successfully."}
+
+        url = f"{self.base_url}/auth/v1/user"
+        headers = {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        payload = {"password": new_password}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.put(url, headers=headers, json=payload)
+            if resp.status_code not in (200, 201):
+                err = resp.json().get("error_description") or resp.json().get("msg") or "Failed to update password"
+                raise Exception(err)
+            return {"success": True, "message": "Password updated successfully."}
+
 
 supabase_service = SupabaseService()

@@ -49,6 +49,14 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str = Field(..., description="Supabase refresh token")
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., description="User email address")
+
+
+class ResetPasswordRequest(BaseModel):
+    password: str = Field(..., min_length=6, description="New user password (min 6 chars)")
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

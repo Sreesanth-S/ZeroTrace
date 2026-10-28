@@ -3,7 +3,7 @@ User Identity and Account Management Endpoints
 Supports user profile retrieval, account deactivation, and non-destructive soft deletion.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from typing import Dict, Any
 
 from backend.app.schemas.auth import (
@@ -14,6 +14,8 @@ from backend.app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     RefreshTokenRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     AuthTokenResponse,
 )
 from backend.app.core.security import get_current_user
@@ -70,6 +72,32 @@ async def refresh_session(body: RefreshTokenRequest):
         )
     except Exception as exc:
         raise UnauthorizedError(str(exc))
+
+
+@router.post("/forgot-password")
+async def forgot_password(body: ForgotPasswordRequest):
+    """Trigger password recovery email via backend."""
+    try:
+        res = await supabase_service.auth_recover_password(body.email)
+        return res
+    except Exception as exc:
+        raise EvidenceValidationError(str(exc))
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Update password for authenticated user."""
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.replace("Bearer ", "").strip()
+        res = await supabase_service.auth_update_password(token, body.password)
+        return res
+    except Exception as exc:
+        raise EvidenceValidationError(str(exc))
 
 
 @router.get("/me", response_model=UserProfileResponse)

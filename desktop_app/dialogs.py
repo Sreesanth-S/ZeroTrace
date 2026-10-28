@@ -1,87 +1,131 @@
 from PyQt5.QtWidgets import (QDialog, QLabel, QVBoxLayout, QLineEdit, QMessageBox, 
-                             QDialogButtonBox, QGroupBox, QStyle, QPushButton, QCheckBox)
+                             QDialogButtonBox, QGroupBox, QStyle, QPushButton, QCheckBox,
+                             QApplication)
 from PyQt5.QtCore import Qt, QSettings
-from PyQt5.QtGui import QFont
-from supabase import create_client, Client
-from supabase_client import set_supabase_auth_token
+from PyQt5.QtGui import QFont, QIcon, QPixmap
 from dotenv import load_dotenv
-import os
-import bcrypt
+from pathlib import Path
+from backend_client import backend_client, UserProxy, check_internet_connection
 
 load_dotenv()
 
+# Absolute path to checkmark and logo assets
+CHECKMARK_ICON_PATH = (Path(__file__).parent / "assets" / "checkmark.png").resolve().as_posix()
+LOGO_ICON_PATH = (Path(__file__).parent / "assets" / "ZeroTrace.png").resolve()
+
+# Modern, Unified Dialog Stylesheet
+DIALOG_STYLESHEET = f"""
+    QDialog, QMessageBox {{
+        background-color: #0F172A;
+        color: #F8FAFC;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }}
+    QMessageBox QLabel {{
+        color: #F8FAFC;
+        font-size: 10.5pt;
+        font-weight: 500;
+        background: transparent;
+        min-height: 32px;
+    }}
+    QGroupBox {{
+        background-color: #111827;
+        border: 1px solid #1E293B;
+        border-radius: 10px;
+        margin-top: 14px;
+        padding: 16px;
+        color: #38BDF8;
+        font-weight: 600;
+        font-size: 10pt;
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        left: 12px;
+        padding: 0 4px;
+        color: #38BDF8;
+    }}
+    QLabel {{
+        color: #CBD5E1;
+        font-size: 10pt;
+        background: transparent;
+    }}
+    QLineEdit {{
+        background-color: #0F172A;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        padding: 8px 12px;
+        color: #F8FAFC;
+        font-size: 10pt;
+    }}
+    QLineEdit:focus {{
+        border-color: #38BDF8;
+        background-color: #131E33;
+    }}
+    QPushButton {{
+        background-color: #0284C7;
+        color: #FFFFFF;
+        border: 1px solid #0EA5E9;
+        border-radius: 6px;
+        padding: 8px 16px;
+        font-weight: 600;
+        font-size: 10pt;
+        min-width: 90px;
+    }}
+    QPushButton:hover {{
+        background-color: #0369A1;
+        border-color: #38BDF8;
+    }}
+    QPushButton:pressed {{
+        background-color: #075985;
+    }}
+    QPushButton:disabled {{
+        background-color: #1E293B;
+        color: #64748B;
+        border-color: #334155;
+    }}
+    QCheckBox {{
+        color: #94A3B8;
+        font-size: 9.5pt;
+        spacing: 8px;
+    }}
+    QCheckBox::indicator {{
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        border: 1px solid #475569;
+        background: #0F172A;
+    }}
+    QCheckBox::indicator:hover {{
+        border-color: #38BDF8;
+    }}
+    QCheckBox::indicator:checked {{
+        background-color: #0284C7;
+        border-color: #38BDF8;
+        image: url("{CHECKMARK_ICON_PATH}");
+    }}
+"""
+
 class LoginDialog(QDialog):
-    """Login dialog with Supabase authentication"""
+    """Login dialog with FastAPI backend authentication"""
     
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ZeroTrace Login")
-        self.setFixedSize(400, 550)
+        self.setMinimumSize(400, 520)
         self.settings = QSettings("ZeroTrace", "Application")
         
-        # Initialize Supabase client
-        try:
-            supabase_url = os.getenv('SUPABASE_URL')
-            supabase_key = os.getenv('SUPABASE_KEY')
-            
-            if supabase_url and supabase_key:
-                self.supabase = create_client(supabase_url, supabase_key)
-                self.supabase_available = True
-            else:
-                self.supabase = None
-                self.supabase_available = False
-                print("Warning: Supabase credentials not found. Running in offline mode.")
-        except Exception as e:
-            self.supabase = None
-            self.supabase_available = False
-            print(f"Warning: Supabase initialization failed: {e}")
+        # Initialize Backend client
+        self.backend = backend_client
+        self.supabase = self.backend
+        self.supabase_available = True
         
         self.user = None
         self.session = None
         
-        # Set dialog style (same as before)
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2c3e50, stop:1 #3498db);
-            }
-            QGroupBox {
-                background-color: rgba(255, 255, 255, 220);
-                border-radius: 10px;
-                margin-top: 1em;
-                padding: 15px;
-            }
-            QLabel {
-                color: white;
-                font-size: 12px;
-            }
-            QLineEdit {
-                padding: 8px;
-                border: 2px solid #3498db;
-                border-radius: 5px;
-                background-color: white;
-                font-size: 12px;
-            }
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 5px;
-                min-width: 100px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QCheckBox {
-                color: white;
-                font-size: 11px;
-            }
-            QDialogButtonBox {
-                button-layout: center;
-            }
-        """)
+        # Apply modern unified dialog style
+        self.setStyleSheet(DIALOG_STYLESHEET)
+        if LOGO_ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(LOGO_ICON_PATH)))
         self.setup_ui()
     
     def setup_ui(self):
@@ -91,7 +135,10 @@ class LoginDialog(QDialog):
         
         # Logo/Title section
         icon_label = QLabel()
-        icon_label.setPixmap(self.style().standardIcon(QStyle.SP_VistaShield).pixmap(64, 64))
+        if LOGO_ICON_PATH.exists():
+            icon_label.setPixmap(QPixmap(str(LOGO_ICON_PATH)).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            icon_label.setPixmap(self.style().standardIcon(QStyle.SP_VistaShield).pixmap(64, 64))
         icon_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(icon_label)
         
@@ -106,14 +153,10 @@ class LoginDialog(QDialog):
         layout.addWidget(subtitle)
         
         # Connection status
-        if self.supabase_available:
-            status_label = QLabel("✓ Connected to Cloud")
-            status_label.setStyleSheet("color: #2ecc71; font-weight: bold;")
-        else:
-            status_label = QLabel("⚠ Offline Mode")
-            status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
-        status_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(status_label)
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.update_connection_status()
+        layout.addWidget(self.status_label)
         
         layout.addSpacing(10)
         
@@ -126,7 +169,6 @@ class LoginDialog(QDialog):
         # Email field
         email_label = QLabel("Email:")
         email_label.setFont(QFont("Segoe UI", 10))
-        email_label.setStyleSheet("color: #2c3e50;")
         self.email_edit = QLineEdit()
         self.email_edit.setPlaceholderText("Enter your email")
         self.email_edit.setFont(QFont("Segoe UI", 10))
@@ -136,7 +178,6 @@ class LoginDialog(QDialog):
         # Password field
         password_label = QLabel("Password:")
         password_label.setFont(QFont("Segoe UI", 10))
-        password_label.setStyleSheet("color: #2c3e50;")
         self.password_edit = QLineEdit()
         self.password_edit.setPlaceholderText("Enter your password")
         self.password_edit.setEchoMode(QLineEdit.Password)
@@ -146,7 +187,6 @@ class LoginDialog(QDialog):
         
         # Remember me checkbox
         self.remember_me = QCheckBox("Remember email")
-        self.remember_me.setStyleSheet("color: #2c3e50;")
         login_layout.addWidget(self.remember_me)
         
         layout.addWidget(login_group)
@@ -156,26 +196,21 @@ class LoginDialog(QDialog):
         # Buttons
         button_box = QDialogButtonBox()
         
-        login_btn = QPushButton("Login")
-        login_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        login_btn.clicked.connect(self.authenticate)
+        self.login_btn = QPushButton("Login")
+        self.login_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.login_btn.clicked.connect(self.authenticate)
         
-        signup_btn = QPushButton("Sign Up")
-        signup_btn.setFont(QFont("Segoe UI", 10))
-        signup_btn.clicked.connect(self.show_signup)
+        self.signup_btn = QPushButton("Sign Up")
+        self.signup_btn.setFont(QFont("Segoe UI", 10))
+        self.signup_btn.clicked.connect(self.show_signup)
         
-        offline_btn = QPushButton("Continue Offline")
-        offline_btn.setFont(QFont("Segoe UI", 10))
-        offline_btn.clicked.connect(self.continue_offline)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFont(QFont("Segoe UI", 10))
+        self.cancel_btn.clicked.connect(self.reject)
         
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFont(QFont("Segoe UI", 10))
-        cancel_btn.clicked.connect(self.reject)
-        
-        button_box.addButton(login_btn, QDialogButtonBox.AcceptRole)
-        button_box.addButton(signup_btn, QDialogButtonBox.ActionRole)
-        button_box.addButton(offline_btn, QDialogButtonBox.ActionRole)
-        button_box.addButton(cancel_btn, QDialogButtonBox.RejectRole)
+        button_box.addButton(self.login_btn, QDialogButtonBox.AcceptRole)
+        button_box.addButton(self.signup_btn, QDialogButtonBox.ActionRole)
+        button_box.addButton(self.cancel_btn, QDialogButtonBox.RejectRole)
         
         layout.addWidget(button_box)
         
@@ -190,8 +225,27 @@ class LoginDialog(QDialog):
         else:
             self.email_edit.setFocus()
     
+    def update_connection_status(self) -> bool:
+        """Check internet & backend reachability and update status label."""
+        has_internet = check_internet_connection()
+        if not has_internet:
+            self.status_label.setText("✕ No Internet Connection")
+            self.status_label.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.status_label.setVisible(True)
+            return False
+
+        if self.backend.check_connection():
+            self.status_label.setText("")
+            self.status_label.setVisible(False)
+            return True
+        else:
+            self.status_label.setText("✕ Server Unreachable")
+            self.status_label.setStyleSheet("color: #e67e22; font-weight: bold;")
+            self.status_label.setVisible(True)
+            return False
+
     def authenticate(self):
-        """Authenticate user with Supabase"""
+        """Authenticate user with FastAPI backend with visual loading indicator"""
         email = self.email_edit.text().strip()
         password = self.password_edit.text()
         
@@ -203,42 +257,37 @@ class LoginDialog(QDialog):
             QMessageBox.warning(self, "Error", "Please enter a valid email address")
             return
         
-        if not self.supabase_available:
-            QMessageBox.warning(
-                self, 
-                "Offline Mode", 
-                "Supabase is not available.\n\nClick 'Continue Offline' to use the app without cloud features."
-            )
-            return
-        
+        # Show immediate loading state
+        self.login_btn.setEnabled(False)
+        self.signup_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+        self.login_btn.setText("Loading...")
+        QApplication.processEvents()
+
         try:
-            # Sign in with Supabase
-            response = self.supabase.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
+            if not check_internet_connection():
+                self.update_connection_status()
+                QMessageBox.critical(
+                    self, 
+                    "No Internet Connection", 
+                    "Please connect your device to the internet and try again."
+                )
+                return
+
+            if not self.backend.check_connection():
+                self.update_connection_status()
+                QMessageBox.critical(
+                    self, 
+                    "Server Connection Error", 
+                    "Cannot connect to the server.\n\n"
+                    "Please verify your network connection"
+                )
+                return
             
-            if response.user and response.session:
-                self.user = response.user
-                self.session = response.session
-                
-                # IMPORTANT: Set session and bearer token on both postgrest and storage clients
-                self.supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
-                set_supabase_auth_token(self.supabase, response.session.access_token)
-                
-                # Automatically ensure user_profiles row exists for this user
-                try:
-                    profile_check = self.supabase.table('user_profiles').select('id').eq('id', response.user.id).execute()
-                    if not profile_check.data:
-                        user_meta = getattr(response.user, 'user_metadata', {}) or {}
-                        full_name = user_meta.get('full_name') or user_meta.get('name') or email.split('@')[0]
-                        self.supabase.table('user_profiles').upsert({
-                            'id': response.user.id,
-                            'full_name': full_name
-                        }, on_conflict='id').execute()
-                        print(f"Automatically created profile for user: {response.user.id}")
-                except Exception as profile_err:
-                    print(f"Auto profile creation check notice: {profile_err}")
+            success = backend_client.sign_in(email, password)
+            if success:
+                self.user = UserProxy(backend_client.user)
+                self.session = backend_client.session
                 
                 # Save email if remember me is checked
                 if self.remember_me.isChecked():
@@ -253,13 +302,15 @@ class LoginDialog(QDialog):
                 )
                 self.accept()
             else:
+                self.update_connection_status()
                 QMessageBox.critical(
                     self,
                     "Authentication Failed",
                     "Invalid email or password"
                 )
-                
+                    
         except Exception as e:
+            self.update_connection_status()
             error_msg = str(e)
             
             if "Invalid login credentials" in error_msg:
@@ -280,84 +331,61 @@ class LoginDialog(QDialog):
                     "Login Error",
                     f"An error occurred during login:\n\n{error_msg}"
                 )
+        finally:
+            self.login_btn.setText("Login")
+            self.login_btn.setEnabled(True)
+            self.signup_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(True)
+            self.update_connection_status()
     
     def show_signup(self):
-        """Show signup dialog"""
-        signup_dialog = SignupDialog(self.supabase, self)
-        if signup_dialog.exec_() == QDialog.Accepted:
-            QMessageBox.information(
-                self,
-                "Success",
-                "Account created successfully!\n\nPlease check your email to verify your account, then log in."
-            )
-    
-    def continue_offline(self):
-        """Continue in offline mode"""
-        reply = QMessageBox.question(
-            self,
-            "Offline Mode",
-            "Continue in offline mode?\n\n"
-            "Features not available offline:\n"
-            "• Cloud certificate storage\n"
-            "• Certificate sync\n"
-            "• Online verification\n\n"
-            "Local features will still work:\n"
-            "• Drive wiping\n"
-            "• Local certificate generation\n"
-            "• Operation logging",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            self.user = None
-            self.session = None
-            self.accept()
+        """Show signup dialog with loading feedback"""
+        self.signup_btn.setEnabled(False)
+        self.signup_btn.setText("Loading...")
+        QApplication.processEvents()
+
+        try:
+            if not check_internet_connection():
+                self.update_connection_status()
+                QMessageBox.critical(
+                    self,
+                    "No Internet Connection",
+                    "Please connect your device to the internet and try again."
+                )
+                return
+
+            if not self.backend.check_connection():
+                self.update_connection_status()
+                QMessageBox.critical(
+                    self,
+                    "Server Unreachable",
+                    "Cannot connect to the server."
+                )
+                return
+
+            signup_dialog = SignupDialog(self.supabase, self)
+            if signup_dialog.exec_() == QDialog.Accepted:
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    "Account created successfully!\n\nPlease check your email to verify your account, then log in."
+                )
+        finally:
+            self.signup_btn.setText("Sign Up")
+            self.signup_btn.setEnabled(True)
 
 
 class SignupDialog(QDialog):
     """Sign up dialog for new users"""
     
-    def __init__(self, supabase_client: Client, parent=None):
+    def __init__(self, backend_client=None, parent=None):
         super().__init__(parent)
-        self.supabase = supabase_client
+        self.supabase = backend_client
         self.setWindowTitle("Create Account")
-        self.setFixedSize(400, 500)
-        
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2c3e50, stop:1 #3498db);
-            }
-            QGroupBox {
-                background-color: rgba(255, 255, 255, 220);
-                border-radius: 10px;
-                margin-top: 1em;
-                padding: 15px;
-            }
-            QLabel {
-                color: #2c3e50;
-            }
-            QLineEdit {
-                padding: 8px;
-                border: 2px solid #3498db;
-                border-radius: 5px;
-                background-color: white;
-                font-size: 12px;
-            }
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 5px;
-                min-width: 100px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        
+        if LOGO_ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(LOGO_ICON_PATH)))
+        self.setMinimumSize(400, 520)
+        self.setStyleSheet(DIALOG_STYLESHEET)
         self.setup_ui()
     
     def setup_ui(self):
@@ -407,18 +435,20 @@ class SignupDialog(QDialog):
         layout.addWidget(form_group)
         layout.addSpacing(10)
         
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.button(QDialogButtonBox.Ok).setText("Sign Up")
-        button_box.button(QDialogButtonBox.Ok).setFont(QFont("Segoe UI", 10, QFont.Bold))
-        button_box.button(QDialogButtonBox.Cancel).setFont(QFont("Segoe UI", 10))
-        button_box.accepted.connect(self.signup)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.signup_btn = self.button_box.button(QDialogButtonBox.Ok)
+        self.signup_btn.setText("Sign Up")
+        self.signup_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        self.cancel_btn = self.button_box.button(QDialogButtonBox.Cancel)
+        self.cancel_btn.setFont(QFont("Segoe UI", 10))
+        self.button_box.accepted.connect(self.signup)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
         
         self.setLayout(layout)
     
     def signup(self):
-        """Create new user account"""
+        """Create new user account with visual loading state"""
         name = self.name_edit.text().strip()
         email = self.email_edit.text().strip()
         password = self.password_edit.text()
@@ -440,29 +470,44 @@ class SignupDialog(QDialog):
             QMessageBox.warning(self, "Error", "Passwords do not match")
             return
         
+        # Show immediate loading state
+        self.signup_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+        self.signup_btn.setText("Loading...")
+        QApplication.processEvents()
+
         try:
-            # Sign up with Supabase
-            response = self.supabase.auth.sign_up({
-                "email": email,
-                "password": password,
-                "options": {
-                    "data": {
-                        "full_name": name
-                    }
-                }
-            })
-            
-            if response.user:
-                # Note: User profile will be created automatically by database trigger
-                # or after email verification when user first logs in
+            if not check_internet_connection():
+                QMessageBox.critical(
+                    self,
+                    "No Internet Connection",
+                    "Please connect your device to the internet and try again."
+                )
+                return
+
+            from backend_client import backend_client
+            if not backend_client.check_connection():
+                QMessageBox.critical(
+                    self,
+                    "Server Unreachable",
+                    "Cannot connect to the server."
+                )
+                return
+            success = backend_client.sign_up(email, password, name)
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Account Created",
+                    "Your account has been created successfully. You can now log in."
+                )
                 self.accept()
             else:
                 QMessageBox.critical(
                     self,
                     "Sign Up Failed",
-                    "Could not create account. Please try again."
+                    "Could not create account. Please check your details and try again."
                 )
-                
+                    
         except Exception as e:
             error_msg = str(e)
             
@@ -478,301 +523,7 @@ class SignupDialog(QDialog):
                     "Sign Up Error",
                     f"An error occurred during sign up:\n\n{error_msg}"
                 )
-
-
-class PinDialog(QDialog):
-    """PIN setup/entry dialog with Supabase storage"""
-    
-    def __init__(self, supabase_client: Client = None, user_id: str = None, setup_mode=True):
-        super().__init__()
-        self.supabase = supabase_client
-        self.user_id = user_id
-        self.setup_mode = setup_mode
-        self.pin = None
-        
-        self.setWindowTitle("Set Security PIN" if setup_mode else "Enter Security PIN")
-        self.setFixedSize(460, setup_mode and 480 or 420)
-        
-        self.setStyleSheet("""
-            QDialog {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2c3e50, stop:1 #3498db);
-            }
-            QGroupBox {
-                background-color: rgba(255, 255, 255, 240);
-                border-radius: 10px;
-                margin-top: 1.5em;
-                padding: 20px;
-                border: 1px solid #3498db;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 3px 0 3px;
-            }
-            QLabel {
-                color: #2c3e50;
-            }
-            QLineEdit {
-                padding: 12px;
-                border: 2px solid #3498db;
-                border-radius: 5px;
-                background-color: #ffffff;
-                font-size: 16px;
-                text-align: center;
-                color: #2c3e50;
-                selection-background-color: #3498db;
-                min-height: 35px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2980b9;
-                background-color: #ecf0f1;
-            }
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                min-width: 100px;
-                font-weight: bold;
-                min-height: 35px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:pressed {
-                background-color: #1f618d;
-            }
-            QDialogButtonBox {
-                button-layout: center;
-            }
-        """)
-        
-        self.setup_ui()
-    
-    def setup_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        icon_label = QLabel()
-        icon_label.setPixmap(self.style().standardIcon(
-            QStyle.SP_DialogNoButton if self.setup_mode else QStyle.SP_DialogYesButton
-        ).pixmap(48, 48))
-        icon_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(icon_label)
-        
-        title = QLabel("Security PIN Setup" if self.setup_mode else "Enter Security PIN")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        title.setStyleSheet("color: white;")
-        layout.addWidget(title)
-        
-        pin_group = QGroupBox()
-        pin_layout = QVBoxLayout(pin_group)
-        pin_layout.setSpacing(12)
-        pin_layout.setContentsMargins(15, 15, 15, 15)
-        
-        instruction_text = "Set a 4-digit PIN to secure the application:" if self.setup_mode else "Enter your 4-digit security PIN:"
-        instruction_label = QLabel(instruction_text)
-        instruction_label.setFont(QFont("Segoe UI", 11))
-        instruction_label.setAlignment(Qt.AlignCenter)
-        instruction_label.setStyleSheet("color: #2c3e50; font-weight: 500;")
-        pin_layout.addWidget(instruction_label)
-        
-        pin_layout.addSpacing(5)
-        
-        pin_label = QLabel("Enter PIN:")
-        pin_label.setFont(QFont("Segoe UI", 11))
-        pin_label.setStyleSheet("color: #2c3e50; font-weight: bold;")
-        pin_layout.addWidget(pin_label)
-        
-        self.pin_edit = QLineEdit()
-        self.pin_edit.setEchoMode(QLineEdit.Password)
-        self.pin_edit.setMaxLength(4)
-        self.pin_edit.setAlignment(Qt.AlignCenter)
-        self.pin_edit.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        self.pin_edit.setMinimumHeight(50)
-        self.pin_edit.setPlaceholderText("••••")
-        pin_layout.addWidget(self.pin_edit)
-        
-        if self.setup_mode:
-            pin_layout.addSpacing(8)
-            
-            confirm_label = QLabel("Confirm PIN:")
-            confirm_label.setFont(QFont("Segoe UI", 11))
-            confirm_label.setStyleSheet("color: #2c3e50; font-weight: bold;")
-            pin_layout.addWidget(confirm_label)
-            
-            self.confirm_pin_edit = QLineEdit()
-            self.confirm_pin_edit.setEchoMode(QLineEdit.Password)
-            self.confirm_pin_edit.setMaxLength(4)
-            self.confirm_pin_edit.setAlignment(Qt.AlignCenter)
-            self.confirm_pin_edit.setFont(QFont("Segoe UI", 18, QFont.Bold))
-            self.confirm_pin_edit.setMinimumHeight(50)
-            self.confirm_pin_edit.setPlaceholderText("••••")
-            pin_layout.addWidget(self.confirm_pin_edit)
-        
-        layout.addWidget(pin_group)
-        layout.addSpacing(10)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.button(QDialogButtonBox.Ok).setText("Set PIN" if self.setup_mode else "Submit")
-        button_box.button(QDialogButtonBox.Ok).setFont(QFont("Segoe UI", 10, QFont.Bold))
-        button_box.button(QDialogButtonBox.Cancel).setFont(QFont("Segoe UI", 10))
-        button_box.accepted.connect(self.validate_pin)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-        self.setLayout(layout)
-        self.pin_edit.setFocus()
-    
-    def validate_pin(self):
-        """Validate and save/verify PIN"""
-        pin = self.pin_edit.text()
-        
-        if len(pin) < 4:
-            QMessageBox.warning(self, "Error", "PIN must be 4 digits")
-            return
-        
-        if not pin.isdigit():
-            QMessageBox.warning(self, "Error", "PIN must contain only numbers")
-            return
-        
-        if self.setup_mode:
-            confirm_pin = self.confirm_pin_edit.text()
-            if pin != confirm_pin:
-                QMessageBox.warning(self, "Error", "PINs do not match")
-                return
-            
-            # Save PIN
-            if self.supabase and self.user_id:
-                if self.save_pin_to_supabase(pin):
-                    self.pin = pin
-                    self.accept()
-                else:
-                    # Fallback to local
-                    self.save_pin_locally(pin)
-                    self.pin = pin
-                    self.accept()
-            else:
-                self.save_pin_locally(pin)
-                self.pin = pin
-                self.accept()
-        else:
-            # Verify PIN
-            if self.supabase and self.user_id:
-                if self.verify_pin_from_supabase(pin):
-                    self.pin = pin
-                    self.accept()
-                elif self.verify_pin_locally(pin):
-                    self.pin = pin
-                    self.accept()
-                else:
-                    QMessageBox.critical(self, "Error", "Incorrect PIN")
-            else:
-                if self.verify_pin_locally(pin):
-                    self.pin = pin
-                    self.accept()
-                else:
-                    QMessageBox.critical(self, "Error", "Incorrect PIN")
-    
-    def save_pin_to_supabase(self, pin: str) -> bool:
-        """Save hashed PIN to Supabase user_profiles"""
-        try:
-            pin_hash = bcrypt.hashpw(pin.encode('utf-8'), bcrypt.gensalt())
-            pin_hash_str = pin_hash.decode('utf-8')
-
-            print(f"Attempting to save PIN for user: {self.user_id}")
-
-            if self.supabase and hasattr(self.supabase, 'auth'):
-                try:
-                    sess = self.supabase.auth.get_session()
-                    if sess and getattr(sess, 'access_token', None):
-                        self.supabase.postgrest.auth(sess.access_token)
-                except Exception as auth_err:
-                    print(f"Warning: Could not set postgrest auth token: {auth_err}")
-
-            response = self.supabase.table('user_profiles').upsert({
-                'id': self.user_id,
-                'pin_hash': pin_hash_str
-            }, on_conflict='id').execute()
-            print(f"PIN upsert response: {response}")
-
-            verify = self.supabase.table('user_profiles')\
-                .select('pin_hash')\
-                .eq('id', self.user_id)\
-                .single()\
-                .execute()
-            saved_hash = (verify.data or {}).get('pin_hash')
-            if saved_hash and bcrypt.checkpw(pin.encode('utf-8'), saved_hash.encode('utf-8')):
-                print("PIN successfully saved and verified")
-                return True
-
-            print("PIN save verification failed")
-            return False
-
-        except Exception as e:
-            print(f"✗ PIN save completely failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-    def verify_pin_from_supabase(self, pin: str) -> bool:
-        """Verify PIN against Supabase stored hash"""
-        try:
-            if self.supabase and hasattr(self.supabase, 'auth'):
-                try:
-                    sess = self.supabase.auth.get_session()
-                    if sess and getattr(sess, 'access_token', None):
-                        self.supabase.postgrest.auth(sess.access_token)
-                except Exception as auth_err:
-                    print(f"Warning: Could not set postgrest auth token: {auth_err}")
-
-            response = self.supabase.table('user_profiles')\
-                .select('pin_hash')\
-                .eq('id', self.user_id)\
-                .execute()
-            
-            print(f"PIN check response: {response.data}")  # Debug
-            
-            if response.data and len(response.data) > 0:
-                pin_hash = response.data[0].get('pin_hash')
-                if pin_hash:
-                    stored_hash = pin_hash.encode('utf-8')
-                    result = bcrypt.checkpw(pin.encode('utf-8'), stored_hash)
-                    print(f"PIN verification result: {result}")
-                    return result
-                else:
-                    print("No pin_hash found in profile")
-            else:
-                print("No profile found for user")
-            
-            return False
-        
-        except Exception as e:
-            print(f"Failed to verify PIN from Supabase: {e}")
-            return False
-    
-    def save_pin_locally(self, pin: str):
-        """Save PIN locally (fallback)"""
-        settings = QSettings("ZeroTrace", "Application")
-        pin_hash = bcrypt.hashpw(pin.encode('utf-8'), bcrypt.gensalt())
-        settings.setValue("app_pin_hash", pin_hash.decode('utf-8'))
-        print("PIN saved locally")
-    
-    def verify_pin_locally(self, pin: str) -> bool:
-        """Verify PIN against local storage (fallback)"""
-        settings = QSettings("ZeroTrace", "Application")
-        stored_hash = settings.value("app_pin_hash", "")
-        
-        if stored_hash:
-            try:
-                return bcrypt.checkpw(pin.encode('utf-8'), stored_hash.encode('utf-8'))
-            except:
-                old_pin = settings.value("app_pin", "")
-                return pin == old_pin
-        
-        old_pin = settings.value("app_pin", "")
-        return pin == old_pin
+        finally:
+            self.signup_btn.setText("Sign Up")
+            self.signup_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(True)

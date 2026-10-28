@@ -9,7 +9,8 @@ import ctypes
 from typing import List, Dict, Optional, Callable
 from pathlib import Path
 from datetime import datetime
-from logger import logger
+import logging
+logger = logging.getLogger("ZeroTrace")
 from enum import Enum
 import subprocess
 import tempfile
@@ -297,13 +298,13 @@ class DeviceInfo:
 
 
 class WipeJournal:
-    """Persist active wipe operation state to disk for crash & power-loss recovery."""
+    """Track active wipe operation state in-memory (no disk writing or logs folder creation by default)."""
 
     def __init__(self, journal_path: Optional[Path] = None):
-        if not journal_path:
-            journal_path = Path(__file__).parent / 'logs' / 'wipe_journal.json'
-        self.journal_path = Path(journal_path)
-        self.journal_path.parent.mkdir(parents=True, exist_ok=True)
+        self.journal_path = Path(journal_path) if journal_path else None
+        self._in_memory_data: Optional[dict] = None
+        if self.journal_path:
+            self.journal_path.parent.mkdir(parents=True, exist_ok=True)
 
     def start_journal(self, device_info: DeviceInfo, method: str) -> dict:
         journal_data = {
@@ -338,25 +339,28 @@ class WipeJournal:
         logger.info(f"Wipe journal closed with status {status}: {journal_data['journal_id']}")
 
     def save_journal(self, data: dict):
-        try:
-            import json
-            with open(self.journal_path, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Could not save wipe journal: {e}")
+        self._in_memory_data = data
+        if self.journal_path:
+            try:
+                import json
+                with open(self.journal_path, 'w') as f:
+                    json.dump(data, f, indent=2)
+            except Exception as e:
+                logger.warning(f"Could not save wipe journal: {e}")
 
     def load_journal(self) -> Optional[dict]:
-        if self.journal_path.exists():
+        if self.journal_path and self.journal_path.exists():
             try:
                 import json
                 with open(self.journal_path, 'r') as f:
                     return json.load(f)
             except Exception as e:
                 logger.warning(f"Could not load wipe journal: {e}")
-        return None
+        return self._in_memory_data
 
     def clear_journal(self):
-        if self.journal_path.exists():
+        self._in_memory_data = None
+        if self.journal_path and self.journal_path.exists():
             try:
                 self.journal_path.unlink()
             except Exception as e:
@@ -869,7 +873,7 @@ class WipeEngine:
         }
         
         try:
-            logger.log_wipe_start(device_info.name, method)
+            logger.info(f"Wipe operation started - Device: {device_info.name}, Method: {method}")
 
             # Route to appropriate wipe method
             if method in [WipeMethod.ATA_SECURE_ERASE, WipeMethod.ATA_ENHANCED_SECURE_ERASE]:
@@ -891,7 +895,7 @@ class WipeEngine:
                 result = self._perform_software_wipe(device_info, method, progress_callback, result)
 
         except Exception as e:
-            logger.log_error_with_context("Wipe operation", e)
+            logger.error(f"Error during Wipe operation: {e}", exc_info=True)
             result['error'] = str(e)
             result['status'] = 'Failed'
 
@@ -905,7 +909,7 @@ class WipeEngine:
         journal_status = 'COMPLETED' if result['success'] else result['status'].upper()
         self.journal.complete_journal(journal_data, journal_status)
 
-        logger.log_wipe_complete(device_info.name, result['status'], result['duration'])
+        logger.info(f"Wipe operation completed - Device: {device_info.name}, Status: {result['status']}, Duration: {result['duration']}")
 
         if progress_callback:
             progress_callback(100, f"Wipe {result['status']}")
@@ -1473,7 +1477,7 @@ class WipeEngine:
 
             # Log progress periodically
             if bytes_written % (self._buffer_size * 100) == 0:
-                logger.log_wipe_progress(f"Pass {pass_num}/{total_passes}", self._current_progress)
+                logger.debug(f"Wipe progress - Pass {pass_num}/{total_passes}, Progress: {self._current_progress}%")
 
             time.sleep(0.001)
 

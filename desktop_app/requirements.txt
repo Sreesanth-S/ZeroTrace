@@ -1,0 +1,12 @@
+# ZeroTrace PyQt5 Desktop Application Dependencies
+
+# GUI Framework
+PyQt5>=5.15.10
+
+# Windows Storage & Low-Level Hardware Access
+pywin32>=306; sys_platform == 'win32'
+wmi>=1.5.1
+
+# HTTP Client & Environment Configuration
+requests>=2.31.0
+python-dotenv>=1.0.0
